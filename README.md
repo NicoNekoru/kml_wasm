@@ -2,7 +2,7 @@
 
 Canonical Rust implementation of **Kernel ML** (KML). The package exposes a native compiler API and a WASM build for browser clients. It emits body-only HTML snippets, leaving full-page rendering, styling, sanitisation policy, and MathJax loading to the host application.
 
-This directory is intended to work as an independent repository inside a larger monorepo. The KML language spec, implementation notes, tests, and showcase fixture are vendored in [`spec/`](spec/), so the crate can be cloned, tested, and built without relying on sibling directories.
+The KML language spec, implementation notes, tests, and showcase fixture are vendored in [`spec/`](spec/), so the crate can be cloned, tested, and built without relying on sibling directories.
 
 ## Prerequisites
 
