@@ -1,0 +1,161 @@
+---
+title: Kernel ML language showcase
+description: One-file reference for every feature and expected behaviour.
+---
+
+# Kernel ML language showcase
+
+This document is valid Kernel ML (KML) source. It demonstrates **every syntax feature and expected behaviour** so you can see how the language works and how the compiler treats each construct. Compile it to HTML with the Rust WASM or TS pipeline to verify output.
+
+---
+
+# Headings
+
+Headings use `#` at the start of a line. The default is level 1.
+
+# One hash is level 1
+
+We support **explicit level numbers** so numbering is stable: `#[n]` means "heading at level n".
+
+#[1] First-level heading (same as #)
+
+#[2] Second-level heading
+
+#[3] Third-level heading
+
+You can attach an **explicit ID** for cross-references and anchor links. Syntax: `#[n] Your title {#id}`. The ID is used as the HTML element id (and usually slugified for URLs).
+
+#[1] Introduction {#intro}
+
+#[2] Syntax overview {#syntax}
+
+#[3] Block elements {#blocks}
+
+---
+
+# Paragraphs and line breaks
+
+A **paragraph** is any run of non-blank lines. A **blank line** (or two newlines) ends the current paragraph and starts a new one.
+
+This is one paragraph. It can span multiple lines as long as there is no blank line between them.
+
+This is a second paragraph because there was a blank line above.
+
+The **`\n` macro** expands to a single line break (`<br>`) and **does not** end the paragraph. So you can force a line break inside the same paragraph.
+
+This paragraph has a line break\nright here, but it is still one paragraph.
+
+The next paragraph starts after this sentence.
+
+---
+
+# Inline formatting: bold and italic
+
+Use **one asterisk** for *italic* and **two asterisks** for **bold**. Delimiters are matched left-to-right; **longest delimiter wins** when both could apply. Bold and italic can nest: **bold with *italic* inside** and *italic with **bold** inside*. Unbalanced delimiters are a **compile-time error** (no recovery).
+
+Example: *italic*, **bold**, and **bold with *italic* inside**.
+
+---
+
+# Inline code and code blocks
+
+**Inline code** uses backticks. One backtick: `single`, or multiple to allow backticks inside: `` `code` with `` backticks ``. Nothing inside is parsed as markup (math, bold, etc. are suppressed).
+
+Use a **fenced code block** for multi-line code. Opening fence: ``` optionally followed by a language tag. Closing fence: ``` at the **same indentation** as the opening fence. Internal lines can be indented; the compiler **trims** the same amount of leading indentation as the opening fence so you can indent code for readability.
+
+```rust
+fn main() {
+    println!("Hello, Kernel ML!");
+}
+```
+
+```text
+If the opening fence is indented (e.g. inside a list),
+  the closing fence must match that indent.
+  Internal indentation is trimmed accordingly.
+```
+
+---
+
+# Links and footnotes
+
+**Links:** `[link text](url)`. The URL can contain literal parentheses; only the first matching `)` closes the URL, so trailing `)` in the URL are kept (author should encode if needed). Example: [example.com](https://example.com) and [URL with parens](https://example.com/path(a)b).
+
+**Footnotes / citations:** `^[note text](url)`. They are **auto-numbered** in document order. Output is typically a superscript link to the note; a consolidated list of notes (bibliography) appears at the end. Example: a claim^[Source: [doc](https://example.com/doc)] and another^[Second note](https://example.com/two).
+
+---
+
+# Superscript and subscript
+
+**Superscript:** `^{content}`. **Subscript:** `_{content}`. Braces must be **balanced**; you can escape braces as `\{` and `\}`. Nested formatting (e.g. bold or another sup inside) is **not** allowed—only the literal content.
+
+Examples: x^{2}, y_{i}, and x^{2 + \{y\}} with an escaped brace.
+
+---
+
+# Inline math
+
+Math is **not** parsed as Kernel ML; only TeX-style math is interpreted inside. Two forms:
+
+- **Dollar:** `$...$` for inline math. Example: We have $x^2 + y^2 = z^2$ here.
+- **Parens:** `\(...\)` for inline math. Example: Or \( \int_0^1 f(x)\,dx \) like this.
+
+Document macros (e.g. `\n`) **do not** expand inside math; the pre-lexer finds math/code regions before macro expansion.
+
+---
+
+# Display math
+
+**Display (block) math** is its own block. It inherits the **indentation** of its opening delimiter (e.g. when nested in a list). Two forms:
+
+- **Double dollar:** `$$...$$` on its own lines or spanning lines.
+- **Bracket:** `\[...\]`.
+
+$$
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
+$$
+
+\[
+\int_0^{2\pi} \sin^2 x\,dx = \pi
+\]
+
+---
+
+# Lists
+
+**Unordered lists:** line starts with `- ` (dash and space). **Ordered lists:** `=[a]`, `=[i]`, or `=[1]` for alphabetic, roman, or arabic. The **first nested item** sets the **file-wide indent unit** (e.g. 4 spaces); later inconsistent indentation is a compile-time error. At each depth, that many indent units define the "line start," so you can nest code blocks, display math, and sub-lists.
+
+- first unordered item
+- second item
+    =[a] nested ordered (alphabetic)
+    =[a] second at same depth
+    =[1] arabic style
+        - deeply nested bullet
+        ```python
+        def nested():
+            return 42
+        ```
+        $$\sum_{k=0}^{\infty} \frac{1}{2^k} = 2$$
+    =[i] back to roman
+
+---
+
+# Frontmatter
+
+If the **first line** is `---`, the parser reads until the next `---` as **frontmatter** (metadata). It is not rendered as body content; the emitter can use it for HTML `<meta>` or other metadata. Example at the top of this file.
+
+---
+
+# Parsing and compilation rules (summary)
+
+=1. **Pre-lex:** Math and code regions are found first (code before math). No nesting.
+2. **Macros:** Expanded top-to-bottom in normal text only; `\n` -> `<br>`. No expansion inside math/code.
+3. **Blocks:** Frontmatter, headings, lists, code blocks, display math, then paragraphs. Lists and fences respect indentation.
+4. **Inline:** Runs only inside paragraph/heading text. Code and math suppress further inline parsing.
+5. **Errors:** Invalid or unmatched syntax fails compilation; no error correction.
+
+---
+
+# Raw HTML
+
+Explicit HTML is allowed. No sanitisation; trust level equals raw HTML. (Not shown here to keep the sample safe; use with trusted source only.)
