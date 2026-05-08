@@ -164,6 +164,20 @@ This is a new paragraph."#;
         );
     }
 
+    #[test]
+    fn test_display_math_after_paragraph_without_blank_line() {
+        let source = "gdsfaf\n$$4234$$";
+        let out = compile_inner(source).expect("display math should start a block after paragraph");
+        assert!(
+            out.contains("<p>gdsfaf</p>"),
+            "expected paragraph; got: {out}"
+        );
+        assert!(
+            out.contains("<div class=\"math math-display\">\\[4234\\]</div>"),
+            "expected display math block; got: {out}"
+        );
+    }
+
     /// Pre-lex: nested code block (indented closing fence) must not open CodeInline.
     #[test]
     fn test_prelex_nested_code_block() {

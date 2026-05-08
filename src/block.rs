@@ -521,7 +521,7 @@ fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Block, usize), Compi
     let mut i = start;
     while i < lines.len() {
         let line = lines[i];
-        if line.trim().is_empty() {
+        if line.trim().is_empty() || (i > start && is_block_start_line(line)) {
             break;
         }
         parts.push(line);
@@ -530,4 +530,17 @@ fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Block, usize), Compi
     let text = parts.join("\n").trim().to_string();
     let inlines = parse_inline(&text)?;
     Ok((Block::Paragraph { inlines }, i))
+}
+
+fn is_block_start_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.starts_with("```")
+        || trimmed == ":::html"
+        || trimmed.starts_with("$$")
+        || trimmed.starts_with("\\[")
+        || parse_heading(trimmed).is_some()
+        || is_list_marker(line.trim_start())
 }
