@@ -62,6 +62,10 @@ pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), Compil
             if let Some(close_idx) = trimmed[2..].find("$$") {
                 let content = trimmed[2..2 + close_idx].trim().to_string();
                 blocks.push(Block::DisplayMath { content });
+                let tail = trimmed[2 + close_idx + 2..].trim();
+                if !tail.is_empty() {
+                    blocks.extend(parse_paragraph_text(tail)?);
+                }
                 i += 1;
                 continue;
             }
@@ -97,8 +101,8 @@ pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), Compil
             continue;
         }
 
-        let (paragraph, next) = parse_paragraph(&lines, i)?;
-        blocks.push(paragraph);
+        let (paragraph_blocks, next) = parse_paragraph(&lines, i)?;
+        blocks.extend(paragraph_blocks);
         i = next;
     }
 
@@ -495,6 +499,10 @@ fn parse_list_item(
             if let Some(close_idx) = trimmed[2..].find("$$") {
                 let content = trimmed[2..2 + close_idx].trim().to_string();
                 blocks.push(Block::DisplayMath { content });
+                let tail = trimmed[2 + close_idx + 2..].trim();
+                if !tail.is_empty() {
+                    blocks.extend(parse_paragraph_text(tail)?);
+                }
                 i += 1;
                 continue;
             }
@@ -508,15 +516,15 @@ fn parse_list_item(
         }
 
         // Otherwise, treat as paragraph content at this item's body.
-        let (para, next) = parse_paragraph(lines, i)?;
-        blocks.push(para);
+        let (paragraph_blocks, next) = parse_paragraph(lines, i)?;
+        blocks.extend(paragraph_blocks);
         i = next;
     }
 
     Ok((ListItem { blocks }, i))
 }
 
-fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Block, usize), CompileError> {
+fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Vec<Block>, usize), CompileError> {
     let mut parts = Vec::new();
     let mut i = start;
     while i < lines.len() {
@@ -528,8 +536,73 @@ fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Block, usize), Compi
         i += 1;
     }
     let text = parts.join("\n").trim().to_string();
-    let inlines = parse_inline(&text)?;
-    Ok((Block::Paragraph { inlines }, i))
+    Ok((parse_paragraph_text(&text)?, i))
+}
+
+fn parse_paragraph_text(text: &str) -> Result<Vec<Block>, CompileError> {
+    let mut blocks = Vec::new();
+    let mut start = 0usize;
+
+    while start < text.len() {
+        let Some((open, close, after_close)) = find_display_math_span(text, start)? else {
+            let tail = text[start..].trim();
+            if !tail.is_empty() {
+                blocks.push(Block::Paragraph {
+                    inlines: parse_inline(tail)?,
+                });
+            }
+            return Ok(blocks);
+        };
+
+        let before = text[start..open].trim();
+        if !before.is_empty() {
+            blocks.push(Block::Paragraph {
+                inlines: parse_inline(before)?,
+            });
+        }
+        blocks.push(Block::DisplayMath {
+            content: text[open + 2..close].trim().to_string(),
+        });
+        start = after_close;
+    }
+
+    Ok(blocks)
+}
+
+fn find_display_math_span(
+    text: &str,
+    start: usize,
+) -> Result<Option<(usize, usize, usize)>, CompileError> {
+    let mut i = start;
+    while i < text.len() {
+        if text[i..].starts_with('`') {
+            i = skip_backtick_span(text, i);
+            continue;
+        }
+        if text[i..].starts_with("$$") {
+            let close = text[i + 2..].find("$$").ok_or_else(|| CompileError {
+                message: "Unclosed $$ math".into(),
+                offset: i,
+            })? + i
+                + 2;
+            return Ok(Some((i, close, close + 2)));
+        }
+        i += text[i..].chars().next().map(char::len_utf8).unwrap_or(1);
+    }
+    Ok(None)
+}
+
+fn skip_backtick_span(text: &str, start: usize) -> usize {
+    let run = text[start..].chars().take_while(|c| *c == '`').count();
+    if run == 0 {
+        return start + 1;
+    }
+    let fence = "`".repeat(run);
+    let content_start = start + run;
+    text[content_start..]
+        .find(&fence)
+        .map(|close| content_start + close + run)
+        .unwrap_or(content_start)
 }
 
 fn is_block_start_line(line: &str) -> bool {

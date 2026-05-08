@@ -31,17 +31,6 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i = close_char + 1;
             continue;
         }
-        if rest.starts_with("$$") {
-            let close_byte = rest[2..].find("$$").ok_or_else(|| CompileError {
-                message: "Unclosed $$ math".into(),
-                offset: 0,
-            })?;
-            let content = rest[2..2 + close_byte].trim().to_string();
-            let consumed_chars = rest[..2 + close_byte + 2].chars().count();
-            result.push(Inline::InlineMath { content });
-            i += consumed_chars;
-            continue;
-        }
         if chars[i] == '$' && (i + 1 >= char_count || chars[i + 1] != '$') {
             let close = find_dollar_close(text, i);
             let close_char = close.ok_or_else(|| CompileError {
@@ -338,7 +327,6 @@ fn next_inline_delimiter(text: &str, start_char: usize) -> usize {
         let rest = &text[byte_start..];
         if rest.starts_with("<br>")
             || rest.starts_with("**")
-            || rest.starts_with("$$")
             || rest.starts_with("\\(")
             || rest.starts_with("^{")
             || rest.starts_with("_{")

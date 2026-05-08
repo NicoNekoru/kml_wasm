@@ -179,13 +179,31 @@ This is a new paragraph."#;
     }
 
     #[test]
-    fn test_double_dollar_math_inside_paragraph() {
+    fn test_double_dollar_math_splits_paragraph_into_display_blocks() {
         let source = "gdsfaf$$4234$$gdsfaf";
-        let out =
-            compile_inner(source).expect("double-dollar math should be atomic inline content");
+        let out = compile_inner(source).expect("double-dollar math should start a display block");
         assert!(
-            out.contains("<p>gdsfaf<span class=\"math math-inline\">\\(4234\\)</span>gdsfaf</p>"),
-            "expected inline math span; got: {out}"
+            out.contains(
+                "<p>gdsfaf</p>\n<div class=\"math math-display\">\\[4234\\]</div>\n<p>gdsfaf</p>"
+            ),
+            "expected paragraph/display/paragraph split; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_double_dollar_math_spans_split_paragraph() {
+        let source =
+            "sadfsadf$$test$$sfdafasdlfajsdfsafasdsadfsadf$$test$$sfdafasdlfajsdfsafasdsadfsadf $$test$$ sfdafasdlfajsdfsafasd";
+        let out =
+            compile_inner(source).expect("double-dollar math spans should start display blocks");
+        assert_eq!(
+            out.matches("math-display").count(),
+            3,
+            "expected three display math blocks; got: {out}"
+        );
+        assert!(
+            !out.contains("math-inline"),
+            "double-dollar math should not emit inline math; got: {out}"
         );
     }
 
