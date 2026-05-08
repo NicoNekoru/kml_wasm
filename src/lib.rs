@@ -178,6 +178,17 @@ This is a new paragraph."#;
         );
     }
 
+    #[test]
+    fn test_double_dollar_math_inside_paragraph() {
+        let source = "gdsfaf$$4234$$gdsfaf";
+        let out =
+            compile_inner(source).expect("double-dollar math should be atomic inline content");
+        assert!(
+            out.contains("<p>gdsfaf<span class=\"math math-inline\">\\(4234\\)</span>gdsfaf</p>"),
+            "expected inline math span; got: {out}"
+        );
+    }
+
     /// Pre-lex: nested code block (indented closing fence) must not open CodeInline.
     #[test]
     fn test_prelex_nested_code_block() {
