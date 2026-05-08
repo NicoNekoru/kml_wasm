@@ -28,7 +28,11 @@ impl Emitter {
     pub fn emit_html(&mut self, blocks: &[Block], _frontmatter: Option<&str>) -> String {
         self.footnote_table.clear();
         self.heading_ids.clear();
-        let body: String = blocks.iter().map(|b| self.emit_block(b)).collect::<Vec<_>>().join("\n");
+        let body: String = blocks
+            .iter()
+            .map(|b| self.emit_block(b))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut out = body;
         if !self.footnote_table.is_empty() {
             out += "\n<footer class=\"footnotes\">\n<ol>\n";
@@ -37,7 +41,11 @@ impl Emitter {
                 let link_part = if href.is_empty() {
                     String::new()
                 } else {
-                    format!(" <a href=\"{}\">{}</a>", escape_html(href), escape_html(href))
+                    format!(
+                        " <a href=\"{}\">{}</a>",
+                        escape_html(href),
+                        escape_html(href)
+                    )
                 };
                 out += &format!(
                     "<li id=\"fn-{num}\">{}{} <a href=\"#fnref-{num}\" class=\"footnote-back\">↩</a></li>\n",
@@ -59,7 +67,13 @@ impl Emitter {
                         let s: String = text
                             .to_lowercase()
                             .chars()
-                            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == ' ' { c } else { '-' })
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric() || c == '-' || c == ' ' {
+                                    c
+                                } else {
+                                    '-'
+                                }
+                            })
                             .collect::<String>()
                             .split_whitespace()
                             .collect::<Vec<_>>()
@@ -69,17 +83,35 @@ impl Emitter {
                             .collect::<String>()
                     }
                 };
-                let id_slug = if id_slug.is_empty() { "heading".to_string() } else { id_slug };
+                let id_slug = if id_slug.is_empty() {
+                    "heading".to_string()
+                } else {
+                    id_slug
+                };
                 self.heading_ids.insert(text.clone(), id_slug.clone());
-                let heading_inlines = parse_inline(text).unwrap_or_else(|_| vec![Inline::Text { content: text.clone() }]);
-                let inner: String = heading_inlines.iter().map(|inl| self.emit_inline(inl)).collect();
-                format!("<h{level} id=\"{}\">{inner}</h{level}>", escape_html(&id_slug))
+                let heading_inlines = parse_inline(text).unwrap_or_else(|_| {
+                    vec![Inline::Text {
+                        content: text.clone(),
+                    }]
+                });
+                let inner: String = heading_inlines
+                    .iter()
+                    .map(|inl| self.emit_inline(inl))
+                    .collect();
+                format!(
+                    "<h{level} id=\"{}\">{inner}</h{level}>",
+                    escape_html(&id_slug)
+                )
             }
             Block::Paragraph { inlines } => {
                 let inner: String = inlines.iter().map(|inl| self.emit_inline(inl)).collect();
                 format!("<p>{inner}</p>")
             }
-            Block::List { ordered, style, items } => {
+            Block::List {
+                ordered,
+                style,
+                items,
+            } => {
                 let tag = if *ordered { "ol" } else { "ul" };
                 let mut attrs = String::new();
                 if *ordered {
@@ -107,13 +139,18 @@ impl Emitter {
                 } else {
                     format!(" class=\"language-{lang}\"")
                 };
-                format!("<pre><code{lang_attr}>{}</code></pre>", escape_html(content))
+                format!(
+                    "<pre><code{lang_attr}>{}</code></pre>",
+                    escape_html(content)
+                )
             }
             Block::DisplayMath { content } => {
-                format!("<div class=\"math math-display\">\\[{}\\]</div>", escape_html(content))
+                format!(
+                    "<div class=\"math math-display\">\\[{}\\]</div>",
+                    escape_html(content)
+                )
             }
             Block::HtmlBlock { content } => content.clone(),
-            Block::FrontMatter { .. } => String::new(),
         }
     }
 
@@ -131,7 +168,10 @@ impl Emitter {
             }
             Inline::Code { content } => format!("<code>{}</code>", escape_html(content)),
             Inline::InlineMath { content } => {
-                format!("<span class=\"math math-inline\">\\({}\\)</span>", escape_html(content))
+                format!(
+                    "<span class=\"math math-inline\">\\({}\\)</span>",
+                    escape_html(content)
+                )
             }
             Inline::Link { text, href } => {
                 format!(

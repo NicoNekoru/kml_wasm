@@ -265,16 +265,17 @@ enum ListKind {
 /// True if `label` is a non-empty Roman numeral fragment (e.g. `ii` for second item in an `i`-style list).
 fn roman_numeral_marker_label(label: &str) -> bool {
     !label.is_empty()
-        && label
-            .chars()
-            .all(|c| matches!(c, 'i' | 'I' | 'v' | 'V' | 'x' | 'X' | 'l' | 'L' | 'c' | 'C' | 'm' | 'M'))
+        && label.chars().all(|c| {
+            matches!(
+                c,
+                'i' | 'I' | 'v' | 'V' | 'x' | 'X' | 'l' | 'L' | 'c' | 'C' | 'm' | 'M'
+            )
+        })
 }
 
 /// Detect if a trimmed line starts with any list marker.
 fn is_list_marker(trimmed: &str) -> bool {
-    trimmed.starts_with("- ")
-        || trimmed.starts_with("-[")
-        || trimmed.starts_with("=[")
+    trimmed.starts_with("- ") || trimmed.starts_with("-[") || trimmed.starts_with("=[")
 }
 
 /// Classify a list marker and return (kind, rest_of_line_after_marker).
@@ -368,11 +369,10 @@ fn parse_list(
     // Determine list kind from the first item at this base_indent.
     let first_line = lines[i];
     let first_trimmed = first_line.trim_start();
-    let (kind, first_rest) =
-        classify_marker(first_trimmed, None).ok_or(CompileError {
-            message: "Invalid list marker".into(),
-            offset: byte_offset_from_lines(lines, start, 0),
-        })?;
+    let (kind, _first_rest) = classify_marker(first_trimmed, None).ok_or(CompileError {
+        message: "Invalid list marker".into(),
+        offset: byte_offset_from_lines(lines, start, 0),
+    })?;
 
     let (ordered, style_opt) = match kind {
         ListKind::Unordered => (false, None),
@@ -513,13 +513,7 @@ fn parse_list_item(
         i = next;
     }
 
-    Ok((
-        ListItem {
-            depth: 0,
-            blocks,
-        },
-        i,
-    ))
+    Ok((ListItem { blocks }, i))
 }
 
 fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Block, usize), CompileError> {

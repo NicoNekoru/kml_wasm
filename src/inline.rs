@@ -8,13 +8,11 @@ use std::result::Result;
 pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
     let mut result = Vec::new();
     let mut i = 0;
-    let n = text.len();
     let chars: Vec<char> = text.chars().collect();
     let char_count = chars.len();
 
     while i < char_count {
         let rest = &text[char_offset_to_byte(text, i)..];
-        let rest_chars: Vec<char> = rest.chars().collect();
 
         if rest.starts_with("<br>") {
             result.push(Inline::LineBreak);
@@ -26,8 +24,8 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
                 message: "Unclosed inline code".into(),
                 offset: 0,
             })?;
-            let content = text[char_offset_to_byte(text, i + 1)
-                ..char_offset_to_byte(text, close_char)]
+            let content = text
+                [char_offset_to_byte(text, i + 1)..char_offset_to_byte(text, close_char)]
                 .replace('`', "");
             result.push(Inline::Code { content });
             i = close_char + 1;
@@ -39,8 +37,8 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
                 message: "Unclosed inline math".into(),
                 offset: 0,
             })?;
-            let content = text[char_offset_to_byte(text, i + 1)
-                ..char_offset_to_byte(text, close_char)]
+            let content = text
+                [char_offset_to_byte(text, i + 1)..char_offset_to_byte(text, close_char)]
                 .trim()
                 .to_string();
             result.push(Inline::InlineMath { content });
@@ -61,14 +59,15 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
         if rest.starts_with("**") {
             let after_open = &rest[2..];
             let inner_start_byte = char_offset_to_byte(text, i + 2);
-            let close_char = after_open.find("**").map(|cb| {
-                i + 2 + after_open[..cb].chars().count()
-            });
+            let close_char = after_open
+                .find("**")
+                .map(|cb| i + 2 + after_open[..cb].chars().count());
             let close_char = close_char.ok_or_else(|| CompileError {
                 message: "Unclosed **".into(),
                 offset: 0,
             })?;
-            let inner = parse_inline(&text[inner_start_byte..char_offset_to_byte(text, close_char)])?;
+            let inner =
+                parse_inline(&text[inner_start_byte..char_offset_to_byte(text, close_char)])?;
             result.push(Inline::Bold { children: inner });
             i = close_char + 2;
             continue;
@@ -79,8 +78,9 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
                 message: "Unclosed *".into(),
                 offset: 0,
             })?;
-            let inner = parse_inline(&text[char_offset_to_byte(text, i + 1)
-                ..char_offset_to_byte(text, close_char)])?;
+            let inner = parse_inline(
+                &text[char_offset_to_byte(text, i + 1)..char_offset_to_byte(text, close_char)],
+            )?;
             result.push(Inline::Italic { children: inner });
             i = close_char + 1;
             continue;
@@ -108,8 +108,8 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
                 message: "Unclosed ^{".into(),
                 offset: 0,
             })?;
-            let content = text[char_offset_to_byte(text, i + 2)
-                ..char_offset_to_byte(text, end_char)]
+            let content = text
+                [char_offset_to_byte(text, i + 2)..char_offset_to_byte(text, end_char)]
                 .to_string();
             result.push(Inline::Superscript { content });
             i = end_char + 1;
@@ -121,8 +121,8 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
                 message: "Unclosed _{".into(),
                 offset: 0,
             })?;
-            let content = text[char_offset_to_byte(text, i + 2)
-                ..char_offset_to_byte(text, end_char)]
+            let content = text
+                [char_offset_to_byte(text, i + 2)..char_offset_to_byte(text, end_char)]
                 .to_string();
             result.push(Inline::Subscript { content });
             i = end_char + 1;
@@ -130,8 +130,8 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
         }
         let j = next_inline_delimiter(text, i);
         let j = std::cmp::max(j, i + 1);
-        let text_content = text[char_offset_to_byte(text, i)..char_offset_to_byte(text, j)]
-            .to_string();
+        let text_content =
+            text[char_offset_to_byte(text, i)..char_offset_to_byte(text, j)].to_string();
         result.push(Inline::Text {
             content: text_content,
         });
@@ -190,7 +190,9 @@ fn find_balanced_braces(text: &str, start_char: usize) -> Option<usize> {
     let mut i = start_byte;
     let bytes = text.as_bytes();
     while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'\\' && (bytes[i + 1] == b'{' || bytes[i + 1] == b'}')
+        if i + 1 < bytes.len()
+            && bytes[i] == b'\\'
+            && (bytes[i + 1] == b'{' || bytes[i + 1] == b'}')
         {
             i += 2;
             continue;
@@ -241,7 +243,10 @@ fn parse_link(text: &str, start_char: usize) -> Option<(String, String, usize)> 
     None
 }
 
-pub(crate) fn parse_footnote_impl(text: &str, start_char: usize) -> Option<(String, String, usize)> {
+pub(crate) fn parse_footnote_impl(
+    text: &str,
+    start_char: usize,
+) -> Option<(String, String, usize)> {
     let start_byte = char_offset_to_byte(text, start_char);
     let rest = &text[start_byte..];
     if !rest.starts_with("^[") {
@@ -320,8 +325,11 @@ fn next_inline_delimiter(text: &str, start_char: usize) -> usize {
     for char_idx in start_char..total_chars {
         let byte_start = char_offset_to_byte(text, char_idx);
         let rest = &text[byte_start..];
-        if rest.starts_with("<br>") || rest.starts_with("**") || rest.starts_with("\\(")
-            || rest.starts_with("^{") || rest.starts_with("_{")
+        if rest.starts_with("<br>")
+            || rest.starts_with("**")
+            || rest.starts_with("\\(")
+            || rest.starts_with("^{")
+            || rest.starts_with("_{")
         {
             return char_idx;
         }
@@ -333,9 +341,7 @@ fn next_inline_delimiter(text: &str, start_char: usize) -> usize {
                 return char_idx;
             }
             if c == '$' && rest.chars().nth(1) != Some('$') {
-                if char_idx == 0
-                    || text[..byte_start].chars().last() != Some('\\')
-                {
+                if char_idx == 0 || text[..byte_start].chars().last() != Some('\\') {
                     return char_idx;
                 }
             }
@@ -357,8 +363,14 @@ mod tests {
         let r = parse_footnote_impl(text, 7);
         assert!(r.is_some(), "parse_footnote should succeed");
         let (note, href, consumed) = r.unwrap();
-        assert_eq!(note, "Source: [doc](https://example.com/doc)", "note should contain nested link");
-        assert_eq!(href, "https://example.com/doc", "href extracted from link in note");
+        assert_eq!(
+            note, "Source: [doc](https://example.com/doc)",
+            "note should contain nested link"
+        );
+        assert_eq!(
+            href, "https://example.com/doc",
+            "href extracted from link in note"
+        );
         assert!(consumed > 0);
     }
 }

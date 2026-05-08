@@ -5,13 +5,15 @@ mod ast;
 mod block;
 mod emit;
 mod inline;
+mod live;
 mod macros;
 mod prelex;
 
 use block::parse_blocks;
 use emit::Emitter;
-use prelex::{pre_lex, CompileError};
+pub use live::{LiveCompiler, LiveCompilerInner, LiveRenderStats};
 use macros::expand_macros;
+use prelex::{pre_lex, CompileError};
 use wasm_bindgen::prelude::*;
 
 fn to_js_error(e: CompileError) -> JsValue {
@@ -69,7 +71,11 @@ This is a new paragraph."#;
         let source = "# Hello\n\n**bold** and *italic*.";
         let out = compile(source).expect("compile");
         assert!(out.contains("<h1"), "should have h1; got: {}", out);
-        assert!(out.contains("Hello"), "should contain heading text; got: {}", out);
+        assert!(
+            out.contains("Hello"),
+            "should contain heading text; got: {}",
+            out
+        );
         assert!(out.contains("<strong>"), "should have bold; got: {}", out);
         assert!(out.contains("<em>"), "should have italic; got: {}", out);
     }
@@ -134,8 +140,16 @@ This is a new paragraph."#;
     fn test_inline_math() {
         let source = "We have $x^2$ here.";
         let out = compile(source).expect("compile");
-        assert!(out.contains("math-inline"), "should have inline math class; got: {}", out);
-        assert!(out.contains("x^2"), "should contain math content; got: {}", out);
+        assert!(
+            out.contains("math-inline"),
+            "should have inline math class; got: {}",
+            out
+        );
+        assert!(
+            out.contains("x^2"),
+            "should contain math content; got: {}",
+            out
+        );
     }
 
     #[test]
@@ -143,7 +157,11 @@ This is a new paragraph."#;
         let source = "```\nfn main() {}\n```";
         let out = compile(source).expect("compile");
         assert!(out.contains("<pre>"), "should have pre; got: {}", out);
-        assert!(out.contains("fn main()"), "should contain code; got: {}", out);
+        assert!(
+            out.contains("fn main()"),
+            "should contain code; got: {}",
+            out
+        );
     }
 
     /// Pre-lex: nested code block (indented closing fence) must not open CodeInline.
@@ -158,8 +176,14 @@ title: x
     ```
 - next"#;
         let spans = pre_lex(source).expect("pre_lex should not fail");
-        let has_code_display = spans.iter().any(|s| matches!(s.kind, crate::prelex::SpanKind::CodeDisplay));
-        assert!(has_code_display, "expected CodeDisplay span; got {:?}", spans);
+        let has_code_display = spans
+            .iter()
+            .any(|s| matches!(s.kind, crate::prelex::SpanKind::CodeDisplay));
+        assert!(
+            has_code_display,
+            "expected CodeDisplay span; got {:?}",
+            spans
+        );
     }
 
     /// Pre-lex: inline `` `code` with `` backticks `` (double-backtick spans).
@@ -167,8 +191,15 @@ title: x
     fn test_prelex_double_backtick_inline() {
         let source = r#"One backtick: `single`, or `` `code` with `` backticks ``."#;
         let spans = pre_lex(source).expect("pre_lex should not fail");
-        let code_inline_count = spans.iter().filter(|s| matches!(s.kind, crate::prelex::SpanKind::CodeInline)).count();
-        assert!(code_inline_count >= 2, "expected at least 2 CodeInline spans; got {:?}", spans);
+        let code_inline_count = spans
+            .iter()
+            .filter(|s| matches!(s.kind, crate::prelex::SpanKind::CodeInline))
+            .count();
+        assert!(
+            code_inline_count >= 2,
+            "expected at least 2 CodeInline spans; got {:?}",
+            spans
+        );
     }
 
     /// Compile the Kernel ML showcase (`spec/showcase.kml`).
@@ -176,9 +207,8 @@ title: x
     #[test]
     fn test_showcase_compile() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/showcase.kml");
-        let source = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("showcase.kml not found at {}: {}", path.display(), e)
-        });
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("showcase.kml not found at {}: {}", path.display(), e));
         let source: String = source.lines().take(127).collect::<Vec<_>>().join("\n");
         let html = compile_inner(&source).expect("showcase.kml must compile");
         assert!(html.contains("</p>"), "expected paragraphs");
@@ -197,10 +227,16 @@ title: x
     fn test_footnote_note_with_link() {
         let source = "A claim^[Source: [doc](https://example.com/doc)].";
         let html = compile_inner(source).expect("footnote must compile");
-        assert!(html.contains("Source: [doc](https://example.com/doc)"), "footer should contain full note text");
+        assert!(
+            html.contains("Source: [doc](https://example.com/doc)"),
+            "footer should contain full note text"
+        );
         assert!(html.contains("fn-1"), "footer should have fn id");
         assert!(html.contains("fnref-1"), "footer should have back ref");
-        assert!(html.contains("footnote-back"), "footer should have back link class");
+        assert!(
+            html.contains("footnote-back"),
+            "footer should have back link class"
+        );
         assert!(html.contains("↩"), "footer should have back link character");
     }
 

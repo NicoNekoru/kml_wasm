@@ -105,7 +105,13 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                     let backticks = count_run_backticks(source, i);
                     if backticks >= code_inline_len {
                         let step_full = byte_len_backticks(source, i, backticks);
-                        do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::CodeInline, i);
+                        do_end_span(
+                            &mut spans,
+                            &mut span_start,
+                            &mut mode,
+                            SpanKind::CodeInline,
+                            i,
+                        );
                         // For ``` always advance past all 3, else we'd treat code-block fence as opening CodeInline.
                         // For `` only skip advance when adjacent `` could open next span (`` `code` with `` backticks ``).
                         let advance_by = if backticks >= 3 {
@@ -116,7 +122,10 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                                 step_full
                             } else {
                                 let remainder = &source[i + step_full..];
-                                let next_pos = remainder.char_indices().find(|(_, c)| *c == '`').map(|(bo, _)| i + step_full + bo);
+                                let next_pos = remainder
+                                    .char_indices()
+                                    .find(|(_, c)| *c == '`')
+                                    .map(|(bo, _)| i + step_full + bo);
                                 let has_adjacent_double = next_pos
                                     .map(|p| count_run_backticks(source, p) == 2)
                                     .unwrap_or(false);
@@ -135,7 +144,13 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
             }
             Mode::CodeDisplay => {
                 if rest.starts_with("```") {
-                    do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::CodeDisplay, i + 3);
+                    do_end_span(
+                        &mut spans,
+                        &mut span_start,
+                        &mut mode,
+                        SpanKind::CodeDisplay,
+                        i + 3,
+                    );
                     i += 3;
                     continue;
                 }
@@ -143,7 +158,13 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
             }
             Mode::MathInline => {
                 if rest.starts_with("\\)") {
-                    do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::MathInline, i + 2);
+                    do_end_span(
+                        &mut spans,
+                        &mut span_start,
+                        &mut mode,
+                        SpanKind::MathInline,
+                        i + 2,
+                    );
                     i += 2;
                     continue;
                 }
@@ -152,12 +173,24 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                     if next_pos < n {
                         let next_ch = peek_non_space(source, next_pos);
                         if next_ch != Some('$') {
-                            do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::MathInline, i + c_len);
+                            do_end_span(
+                                &mut spans,
+                                &mut span_start,
+                                &mut mode,
+                                SpanKind::MathInline,
+                                i + c_len,
+                            );
                             i += c_len;
                             continue;
                         }
                     } else {
-                        do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::MathInline, i + c_len);
+                        do_end_span(
+                            &mut spans,
+                            &mut span_start,
+                            &mut mode,
+                            SpanKind::MathInline,
+                            i + c_len,
+                        );
                         i += c_len;
                         continue;
                     }
@@ -166,12 +199,24 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
             }
             Mode::MathDisplay => {
                 if rest.starts_with("\\]") {
-                    do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::MathDisplay, i + 2);
+                    do_end_span(
+                        &mut spans,
+                        &mut span_start,
+                        &mut mode,
+                        SpanKind::MathDisplay,
+                        i + 2,
+                    );
                     i += 2;
                     continue;
                 }
                 if rest.starts_with("$$") {
-                    do_end_span(&mut spans, &mut span_start, &mut mode, SpanKind::MathDisplay, i + 2);
+                    do_end_span(
+                        &mut spans,
+                        &mut span_start,
+                        &mut mode,
+                        SpanKind::MathDisplay,
+                        i + 2,
+                    );
                     i += 2;
                     continue;
                 }

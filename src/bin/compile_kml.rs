@@ -20,7 +20,11 @@ fn offset_to_line_col_and_line(source: &str, offset: usize) -> (usize, usize, St
             col += 1;
         }
     }
-    let line_str = source.lines().nth(line.saturating_sub(1)).unwrap_or("").to_string();
+    let line_str = source
+        .lines()
+        .nth(line.saturating_sub(1))
+        .unwrap_or("")
+        .to_string();
     (line, col, line_str)
 }
 

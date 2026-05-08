@@ -33,17 +33,10 @@ pub enum Block {
     HtmlBlock {
         content: String,
     },
-    FrontMatter {
-        content: String,
-    },
 }
 
 #[derive(Debug, Clone)]
 pub struct ListItem {
-    /// Logical depth can be recorded here if needed by callers,
-    /// but nested lists should primarily be represented structurally
-    /// via `Block::List` inside `blocks`.
-    pub depth: u32,
     pub blocks: Vec<Block>,
 }
 

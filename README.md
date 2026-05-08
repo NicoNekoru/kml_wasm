@@ -45,6 +45,19 @@ await init()
 const html = compile('# Title')
 ```
 
+For interactive editors, use the stateful `LiveCompiler` export. It keeps parsed
+AST blocks for unchanged top-level chunks and re-emits the full document so
+global output such as footnote numbering remains correct.
+
+```ts
+import init, { LiveCompiler } from 'kml_wasm'
+
+await init()
+const compiler = new LiveCompiler()
+const html = compiler.render(source)
+const stats = JSON.parse(compiler.stats_json())
+```
+
 Host applications can consume the generated package through a file dependency, a workspace package, a published package, or by serving the generated files from a public assets directory.
 
 ## KML spec
