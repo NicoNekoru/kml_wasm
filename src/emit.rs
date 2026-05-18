@@ -1,7 +1,7 @@
 //! HTML emitter: walk AST and emit HTML.
 //! Math nodes emitted as \( \) / \[ \] for client-side MathJax.
 
-use crate::ast::{Block, Inline};
+use crate::ast::{Block, Inline, TableAlignment, TableCell};
 use crate::inline::parse_inline;
 use std::collections::HashMap;
 
@@ -133,6 +133,33 @@ impl Emitter {
                 out.push_str(&format!("</{tag}>"));
                 out
             }
+            Block::Table { rows, header_rows } => {
+                let mut out = String::from("<table>");
+                if *header_rows > 0 {
+                    out.push_str("<thead>");
+                    for row in rows.iter().take(*header_rows) {
+                        out.push_str("<tr>");
+                        for cell in &row.cells {
+                            out.push_str(&self.emit_table_cell(cell));
+                        }
+                        out.push_str("</tr>");
+                    }
+                    out.push_str("</thead>");
+                }
+                if rows.len() > *header_rows {
+                    out.push_str("<tbody>");
+                    for row in rows.iter().skip(*header_rows) {
+                        out.push_str("<tr>");
+                        for cell in &row.cells {
+                            out.push_str(&self.emit_table_cell(cell));
+                        }
+                        out.push_str("</tr>");
+                    }
+                    out.push_str("</tbody>");
+                }
+                out.push_str("</table>");
+                out
+            }
             Block::CodeBlock { lang, content } => {
                 let lang_attr = if lang.is_empty() {
                     String::new()
@@ -152,6 +179,31 @@ impl Emitter {
             }
             Block::HtmlBlock { content } => content.clone(),
         }
+    }
+
+    fn emit_table_cell(&mut self, cell: &TableCell) -> String {
+        let tag = if cell.header { "th" } else { "td" };
+        let mut attrs = String::new();
+        if cell.rowspan > 1 {
+            attrs.push_str(&format!(" rowspan=\"{}\"", cell.rowspan));
+        }
+        if cell.colspan > 1 {
+            attrs.push_str(&format!(" colspan=\"{}\"", cell.colspan));
+        }
+        if let Some(align) = cell.align {
+            let value = match align {
+                TableAlignment::Left => "left",
+                TableAlignment::Center => "center",
+                TableAlignment::Right => "right",
+            };
+            attrs.push_str(&format!(" style=\"text-align: {value}\""));
+        }
+        let inner: String = cell
+            .inlines
+            .iter()
+            .map(|inl| self.emit_inline(inl))
+            .collect();
+        format!("<{tag}{attrs}>{inner}</{tag}>")
     }
 
     fn emit_inline(&mut self, inline: &Inline) -> String {

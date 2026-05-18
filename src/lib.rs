@@ -137,6 +137,120 @@ This is a new paragraph."#;
     }
 
     #[test]
+    fn test_markdown_table_basic_alignment_and_inline_content() {
+        let source = r#"
+| Name | Count | Formula |
+| :--- | ---: | :---: |
+| **Alpha** | 12 | $x^2$ |
+"#;
+        let html = compile_inner(source).expect("markdown table must compile");
+        assert!(html.contains("<table>"), "expected table; got: {html}");
+        assert!(html.contains("<thead>"), "expected table head; got: {html}");
+        assert!(
+            html.contains("<th style=\"text-align: left\">Name</th>"),
+            "expected left-aligned header; got: {html}"
+        );
+        assert!(
+            html.contains("<td style=\"text-align: right\">12</td>"),
+            "expected right-aligned cell; got: {html}"
+        );
+        assert!(
+            html.contains("<strong>Alpha</strong>"),
+            "expected inline parsing in cells; got: {html}"
+        );
+        assert!(
+            html.contains("math-inline"),
+            "expected inline math in cells; got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_table_merge_markers_and_escaped_markers() {
+        let source = r#"
+| H1 | H2 | H3 |
+| --- | --- | --- |
+| Span 2x2 | > | C |
+| ^ | > | D |
+| \^ | \> | E |
+| Left alias | < | F |
+| \< | literal | G |
+"#;
+        let html = compile_inner(source).expect("merged table must compile");
+        assert!(
+            html.contains("<td rowspan=\"2\" colspan=\"2\">Span 2x2</td>"),
+            "expected combined rowspan/colspan; got: {html}"
+        );
+        assert!(
+            !html.contains("<td>&gt;</td><td>D</td>"),
+            "merge marker should not render as data; got: {html}"
+        );
+        assert!(
+            html.contains("<td>^</td><td>&gt;</td><td>E</td>"),
+            "escaped merge markers should render literally; got: {html}"
+        );
+        assert!(
+            html.contains("<td colspan=\"2\">Left alias</td><td>F</td>"),
+            "left-angle merge marker should alias horizontal merge; got: {html}"
+        );
+        assert!(
+            html.contains("<td>&lt;</td><td>literal</td><td>G</td>"),
+            "escaped left-angle marker should render literally; got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_table_vertical_and_multiline_headers() {
+        let source = r#"
+| Region | - | 2025 | > |
+| Metric | - | Q1 | Q2 |
+| --- | --- | --- | --- |
+| Sales | - | 10 | 12 |
+| Combined | - | Span | > |
+| ^ | - | ^ | > |
+"#;
+        let html = compile_inner(source).expect("vertical header table must compile");
+        assert_eq!(
+            html.matches("<thead>").count(),
+            1,
+            "expected one thead; got: {html}"
+        );
+        assert!(
+            html.contains("<th colspan=\"2\">2025</th>"),
+            "expected merged multi-row header; got: {html}"
+        );
+        assert!(
+            html.contains("<tr><th>Sales</th><td>10</td><td>12</td></tr>"),
+            "expected vertical row header and omitted dash separator column; got: {html}"
+        );
+        assert!(
+            html.contains(
+                "<th rowspan=\"2\">Combined</th><td rowspan=\"2\" colspan=\"2\">Span</td>"
+            ),
+            "expected merged vertical header and data cells; got: {html}"
+        );
+        assert!(
+            !html.contains("<th>-</th>") && !html.contains("<td>-</td>"),
+            "vertical separator column should not render; got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_non_rectangular_table_merge_is_error() {
+        let source = r#"
+| H1 | H2 |
+| --- | --- |
+| A | > |
+| ^ | B |
+"#;
+        let err = compile_inner(source).expect_err("non-rectangular merge must fail");
+        assert!(
+            err.message.contains("rectangle"),
+            "expected rectangle error; got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn test_inline_math() {
         let source = "We have $x^2$ here.";
         let out = compile(source).expect("compile");

@@ -31,6 +31,13 @@ All of these will be given in some regular expression, since it is an easy way t
     * NOTE: The default ordered list hierarchy is arabic -> alphabet -> roman -> arabic -> ...
     * NOTE: List depth is determined by the file-wide indent unit set at the first nested list.
     * NOTE: For some level of list depth, that number of tabs/spaces is treated as the start of the line. This means that we can next code blocks, lists, math environments, etc. within some list level.
+* Markdown tables use pipe-delimited rows and a dash delimiter row: `| H1 | H2 |\n| --- | --- |\n| A | B |`.
+    - Delimiter cells may use `:---`, `:---:`, or `---:` for left, center, and right alignment.
+    - Multiple rows before the delimiter row are emitted as header rows.
+    - Inline parsing runs inside table cells. Escape table pipes as `\|`.
+    - A cell containing only `>` or `<` merges into the visible cell to its left; a cell containing only `^` merges into the visible cell above it. Use `\>`, `\<`, or `\^` for literal markers.
+    - Merge markers must describe a rectangular HTML span. Non-rectangular spans are compile errors.
+    - A column whose cells are all dashes, e.g. `-`, is a vertical header separator. The separator column is omitted; body cells to its left are emitted as row headers.
 * /(`)+(.+?)\1/ -- (`text` or ``text``) for code/inline monospaced
 * /```(.*?)\n((.|\n)+?)\n``` -- (```code \n text \n ```) for multiline code/monospaced formatted according to the code language (hljs)
     * NOTE: If the code block "```" starts at some indentation, then the rendered code should trim that much internal indentation as well, unlike existing code blocks/verbatim/minted environments in md and latex.

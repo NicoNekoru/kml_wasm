@@ -159,3 +159,25 @@ See #[1] and #[2]
   * Inline suppression of code/math.
   * Macro expansion before parsing.
   * Compile error if unmatched delimiters.
+
+---
+
+### **11. Tables with spans and headers**
+
+```markdown
+| Region | - | 2025 | > |
+| Metric | - | Q1 | Q2 |
+| --- | --- | --- | --- |
+| Sales | - | 10 | 12 |
+| Combined | - | Span | > |
+| ^ | - | ^ | > |
+| Left alias | - | value | < |
+| \^ | - | \> | literal |
+```
+
+* Checks:
+
+  * Multiple rows before the delimiter become header rows.
+  * Dash-only separator columns create vertical row headers and are omitted.
+  * `>`, `<`, and `^` markers produce rectangular `colspan`/`rowspan` output.
+  * Escaped markers render literally.

@@ -1,7 +1,7 @@
 //! Block parser: consumes expanded source line-by-line.
 //! Frontmatter, headings, lists, code blocks, display math, paragraphs.
 
-use crate::ast::{Block, ListItem};
+use crate::ast::{Block, Inline, ListItem, TableAlignment, TableCell, TableRow};
 use crate::inline::parse_inline;
 use crate::prelex::CompileError;
 use std::result::Result;
@@ -97,6 +97,11 @@ pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), Compil
         if is_list_marker(trimmed_start) {
             let (list_block, next) = parse_list(&lines, i, line_indent, &mut indent_unit)?;
             blocks.push(list_block);
+            i = next;
+            continue;
+        }
+        if let Some((table_block, next)) = parse_table(&lines, i)? {
+            blocks.push(table_block);
             i = next;
             continue;
         }
@@ -258,6 +263,424 @@ fn byte_offset_from_lines(lines: &[&str], line_idx: usize, col: usize) -> usize 
         offset += line.len() + 1; // +1 for '\n'
     }
     offset + col
+}
+
+#[derive(Debug, Clone)]
+struct RawTableRow {
+    source_line: usize,
+    cells: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableMergeMarker {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone)]
+struct MutableTableCell {
+    origin_row: usize,
+    origin_col: usize,
+    in_header_section: bool,
+    inlines: Vec<Inline>,
+    header: bool,
+    align: Option<TableAlignment>,
+    rowspan: usize,
+    colspan: usize,
+}
+
+impl MutableTableCell {
+    fn include(&mut self, row: usize, col: usize) {
+        self.rowspan = self.rowspan.max(row - self.origin_row + 1);
+        self.colspan = self.colspan.max(col - self.origin_col + 1);
+    }
+
+    fn into_cell(self) -> TableCell {
+        TableCell {
+            inlines: self.inlines,
+            header: self.header,
+            align: self.align,
+            rowspan: self.rowspan,
+            colspan: self.colspan,
+        }
+    }
+}
+
+fn parse_table(lines: &[&str], start: usize) -> Result<Option<(Block, usize)>, CompileError> {
+    let Some(delimiter_idx) = find_table_delimiter(lines, start) else {
+        return Ok(None);
+    };
+
+    let delimiter_cells = split_table_row(lines[delimiter_idx]);
+    let alignments = parse_table_delimiter(&delimiter_cells).ok_or_else(|| CompileError {
+        message: "Invalid table delimiter row".into(),
+        offset: byte_offset_from_lines(lines, delimiter_idx, 0),
+    })?;
+    let width = alignments.len();
+
+    let mut raw_rows = Vec::new();
+    for line_idx in start..delimiter_idx {
+        raw_rows.push(parse_table_row(lines, line_idx, width)?);
+    }
+    let header_rows = raw_rows.len();
+
+    let mut next = delimiter_idx + 1;
+    while next < lines.len() {
+        if lines[next].trim().is_empty() || !is_table_row_like(lines[next]) {
+            break;
+        }
+        raw_rows.push(parse_table_row(lines, next, width)?);
+        next += 1;
+    }
+
+    let vertical_separator_cols = find_vertical_separator_cols(&raw_rows, width);
+    let rows = resolve_table_rows(
+        lines,
+        &raw_rows,
+        header_rows,
+        &alignments,
+        &vertical_separator_cols,
+    )?;
+
+    Ok(Some((Block::Table { rows, header_rows }, next)))
+}
+
+fn find_table_delimiter(lines: &[&str], start: usize) -> Option<usize> {
+    let mut i = start;
+    while i < lines.len() {
+        if lines[i].trim().is_empty() || !is_table_row_like(lines[i]) {
+            break;
+        }
+        let cells = split_table_row(lines[i]);
+        if i > start && parse_table_delimiter(&cells).is_some() {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_table_row(
+    lines: &[&str],
+    line_idx: usize,
+    width: usize,
+) -> Result<RawTableRow, CompileError> {
+    let cells = split_table_row(lines[line_idx]);
+    if cells.len() != width {
+        return Err(CompileError {
+            message: format!(
+                "Table row has {} cells but delimiter row has {}",
+                cells.len(),
+                width
+            ),
+            offset: byte_offset_from_lines(lines, line_idx, 0),
+        });
+    }
+    Ok(RawTableRow {
+        source_line: line_idx,
+        cells,
+    })
+}
+
+fn is_table_row_like(line: &str) -> bool {
+    split_table_row(line).len() >= 2
+}
+
+fn split_table_row(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let mut code_run: Option<usize> = None;
+
+    while i < line.len() {
+        let c = line[i..].chars().next().unwrap();
+        if c == '`' && !is_escaped_at(line, i) {
+            let run = count_char_run(line, i, '`');
+            if code_run == Some(run) {
+                code_run = None;
+            } else if code_run.is_none() {
+                code_run = Some(run);
+            }
+            i += byte_len_char_run(line, i, run);
+            continue;
+        }
+
+        if c == '|' && code_run.is_none() && !is_escaped_at(line, i) {
+            cells.push(line[start..i].to_string());
+            i += c.len_utf8();
+            start = i;
+            continue;
+        }
+
+        i += c.len_utf8();
+    }
+    cells.push(line[start..].to_string());
+
+    if starts_with_table_pipe(line) && cells.first().is_some_and(|cell| cell.trim().is_empty()) {
+        cells.remove(0);
+    }
+    if ends_with_table_pipe(line) && cells.last().is_some_and(|cell| cell.trim().is_empty()) {
+        cells.pop();
+    }
+
+    cells
+}
+
+fn starts_with_table_pipe(line: &str) -> bool {
+    line.char_indices()
+        .find(|(_, c)| !c.is_whitespace())
+        .is_some_and(|(idx, c)| c == '|' && !is_escaped_at(line, idx))
+}
+
+fn ends_with_table_pipe(line: &str) -> bool {
+    line.char_indices()
+        .rev()
+        .find(|(_, c)| !c.is_whitespace())
+        .is_some_and(|(idx, c)| c == '|' && !is_escaped_at(line, idx))
+}
+
+fn is_escaped_at(s: &str, byte_idx: usize) -> bool {
+    let mut slash_count = 0usize;
+    let mut i = byte_idx;
+    while i > 0 {
+        let Some((prev_idx, ch)) = s[..i].char_indices().next_back() else {
+            break;
+        };
+        if ch != '\\' {
+            break;
+        }
+        slash_count += 1;
+        i = prev_idx;
+    }
+    slash_count % 2 == 1
+}
+
+fn count_char_run(s: &str, byte_idx: usize, needle: char) -> usize {
+    s[byte_idx..].chars().take_while(|c| *c == needle).count()
+}
+
+fn byte_len_char_run(s: &str, byte_idx: usize, run: usize) -> usize {
+    s[byte_idx..].chars().take(run).map(char::len_utf8).sum()
+}
+
+fn parse_table_delimiter(cells: &[String]) -> Option<Vec<Option<TableAlignment>>> {
+    if cells.len() < 2 {
+        return None;
+    }
+
+    cells
+        .iter()
+        .map(|cell| parse_table_alignment(cell.trim()))
+        .collect()
+}
+
+fn parse_table_alignment(spec: &str) -> Option<Option<TableAlignment>> {
+    if spec.is_empty() {
+        return None;
+    }
+
+    let left_colon = spec.starts_with(':');
+    let right_colon = spec.ends_with(':');
+    let dashes = spec.trim_start_matches(':').trim_end_matches(':');
+    if dashes.is_empty() || !dashes.chars().all(|c| c == '-') {
+        return None;
+    }
+
+    let align = match (left_colon, right_colon) {
+        (true, true) => Some(TableAlignment::Center),
+        (false, true) => Some(TableAlignment::Right),
+        (true, false) => Some(TableAlignment::Left),
+        (false, false) => None,
+    };
+    Some(align)
+}
+
+fn find_vertical_separator_cols(rows: &[RawTableRow], width: usize) -> Vec<bool> {
+    (0..width)
+        .map(|col| {
+            !rows.is_empty()
+                && rows
+                    .iter()
+                    .all(|row| is_unescaped_dash_cell(&row.cells[col]))
+        })
+        .collect()
+}
+
+fn is_unescaped_dash_cell(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    !trimmed.starts_with('\\') && !trimmed.is_empty() && trimmed.chars().all(|c| c == '-')
+}
+
+fn table_merge_marker(raw: &str) -> Option<TableMergeMarker> {
+    match raw.trim() {
+        ">" | "<" => Some(TableMergeMarker::Horizontal),
+        "^" => Some(TableMergeMarker::Vertical),
+        _ => None,
+    }
+}
+
+fn resolve_table_rows(
+    lines: &[&str],
+    raw_rows: &[RawTableRow],
+    header_rows: usize,
+    alignments: &[Option<TableAlignment>],
+    vertical_separator_cols: &[bool],
+) -> Result<Vec<TableRow>, CompileError> {
+    let row_count = raw_rows.len();
+    let width = alignments.len();
+    let first_vertical_separator = vertical_separator_cols.iter().position(|is_sep| *is_sep);
+    let mut mutable_cells: Vec<MutableTableCell> = Vec::new();
+    let mut occupancy: Vec<Vec<Option<usize>>> = vec![vec![None; width]; row_count];
+
+    for row in 0..row_count {
+        for col in 0..width {
+            if vertical_separator_cols[col] {
+                continue;
+            }
+
+            let raw = &raw_rows[row].cells[col];
+            match table_merge_marker(raw) {
+                Some(TableMergeMarker::Horizontal) => {
+                    if col == 0 {
+                        return Err(table_error(
+                            lines,
+                            raw_rows,
+                            row,
+                            "Horizontal table merge marker has no cell to its left",
+                        ));
+                    }
+                    let Some(cell_id) = occupancy[row][col - 1] else {
+                        return Err(table_error(
+                            lines,
+                            raw_rows,
+                            row,
+                            "Horizontal table merge marker has no cell to its left",
+                        ));
+                    };
+                    mutable_cells[cell_id].include(row, col);
+                    occupancy[row][col] = Some(cell_id);
+                }
+                Some(TableMergeMarker::Vertical) => {
+                    if row == 0 {
+                        return Err(table_error(
+                            lines,
+                            raw_rows,
+                            row,
+                            "Vertical table merge marker has no cell above it",
+                        ));
+                    }
+                    let Some(cell_id) = occupancy[row - 1][col] else {
+                        return Err(table_error(
+                            lines,
+                            raw_rows,
+                            row,
+                            "Vertical table merge marker has no cell above it",
+                        ));
+                    };
+                    let current_header_section = row < header_rows;
+                    if mutable_cells[cell_id].in_header_section != current_header_section {
+                        return Err(table_error(
+                            lines,
+                            raw_rows,
+                            row,
+                            "Table merge cannot cross the header/body boundary",
+                        ));
+                    }
+                    mutable_cells[cell_id].include(row, col);
+                    occupancy[row][col] = Some(cell_id);
+                }
+                None => {
+                    let content = unescape_table_cell(raw);
+                    let in_header_section = row < header_rows;
+                    let vertical_header = first_vertical_separator.is_some_and(|sep| col < sep);
+                    let header = in_header_section || vertical_header;
+                    let cell_id = mutable_cells.len();
+                    mutable_cells.push(MutableTableCell {
+                        origin_row: row,
+                        origin_col: col,
+                        in_header_section,
+                        inlines: parse_inline(&content)?,
+                        header,
+                        align: alignments[col],
+                        rowspan: 1,
+                        colspan: 1,
+                    });
+                    occupancy[row][col] = Some(cell_id);
+                }
+            }
+        }
+    }
+
+    validate_table_merges(
+        lines,
+        raw_rows,
+        &mutable_cells,
+        &occupancy,
+        vertical_separator_cols,
+    )?;
+
+    let mut rows: Vec<TableRow> = (0..row_count)
+        .map(|_| TableRow { cells: Vec::new() })
+        .collect();
+    for cell in mutable_cells {
+        rows[cell.origin_row].cells.push(cell.into_cell());
+    }
+
+    Ok(rows)
+}
+
+fn validate_table_merges(
+    lines: &[&str],
+    raw_rows: &[RawTableRow],
+    mutable_cells: &[MutableTableCell],
+    occupancy: &[Vec<Option<usize>>],
+    vertical_separator_cols: &[bool],
+) -> Result<(), CompileError> {
+    for (cell_id, cell) in mutable_cells.iter().enumerate() {
+        for row in cell.origin_row..cell.origin_row + cell.rowspan {
+            for col in cell.origin_col..cell.origin_col + cell.colspan {
+                if vertical_separator_cols[col] || occupancy[row][col] != Some(cell_id) {
+                    return Err(table_error(
+                        lines,
+                        raw_rows,
+                        row,
+                        "Table merge markers must form a rectangle",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn table_error(
+    lines: &[&str],
+    raw_rows: &[RawTableRow],
+    row: usize,
+    message: &str,
+) -> CompileError {
+    CompileError {
+        message: message.into(),
+        offset: byte_offset_from_lines(lines, raw_rows[row].source_line, 0),
+    }
+}
+
+fn unescape_table_cell(raw: &str) -> String {
+    let mut out = String::new();
+    let mut chars = raw.trim().chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.peek().copied() {
+                if matches!(next, '|' | '>' | '<' | '^') {
+                    out.push(next);
+                    chars.next();
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -514,6 +937,11 @@ fn parse_list_item(
             i = next;
             continue;
         }
+        if let Some((table_block, next)) = parse_table(lines, i)? {
+            blocks.push(table_block);
+            i = next;
+            continue;
+        }
 
         // Otherwise, treat as paragraph content at this item's body.
         let (paragraph_blocks, next) = parse_paragraph(lines, i)?;
@@ -529,7 +957,7 @@ fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Vec<Block>, usize), 
     let mut i = start;
     while i < lines.len() {
         let line = lines[i];
-        if line.trim().is_empty() || (i > start && is_block_start_line(line)) {
+        if line.trim().is_empty() || (i > start && is_block_start_at(lines, i)) {
             break;
         }
         parts.push(line);
@@ -603,6 +1031,10 @@ fn skip_backtick_span(text: &str, start: usize) -> usize {
         .find(&fence)
         .map(|close| content_start + close + run)
         .unwrap_or(content_start)
+}
+
+fn is_block_start_at(lines: &[&str], idx: usize) -> bool {
+    is_block_start_line(lines[idx]) || find_table_delimiter(lines, idx).is_some()
 }
 
 fn is_block_start_line(line: &str) -> bool {

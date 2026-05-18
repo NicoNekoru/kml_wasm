@@ -23,6 +23,10 @@ pub enum Block {
         style: Option<String>,
         items: Vec<ListItem>,
     },
+    Table {
+        rows: Vec<TableRow>,
+        header_rows: usize,
+    },
     CodeBlock {
         lang: String,
         content: String,
@@ -38,6 +42,27 @@ pub enum Block {
 #[derive(Debug, Clone)]
 pub struct ListItem {
     pub blocks: Vec<Block>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableRow {
+    pub cells: Vec<TableCell>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableCell {
+    pub inlines: Vec<Inline>,
+    pub header: bool,
+    pub align: Option<TableAlignment>,
+    pub rowspan: usize,
+    pub colspan: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableAlignment {
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Debug, Clone)]

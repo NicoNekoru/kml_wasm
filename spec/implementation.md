@@ -82,6 +82,7 @@ Block =
   | Paragraph { inlines }
   | List { ordered, style, items: [ListItem] }
   | ListItem { depth, blocks: [Block] }
+  | Table { rows: [TableRow], header_rows }
   | CodeBlock { lang, content }
   | DisplayMath { content }
   | HtmlBlock { content }
@@ -91,10 +92,13 @@ Block =
 Algorithm:
 1. If first line is `---`, consume until closing `---` as frontmatter.
 2. For each line, determine its indent level against the indent stack.
-3. Dispatch to sub-parsers based on the line's leading token (`#`, `-`, ` ``` `, `$$`, `\[`, or plain text).
+3. Dispatch to sub-parsers based on the line's leading token or row shape (`#`, `-`, table rows, ` ``` `, `$$`, `\[`, or plain text).
 4. Paragraph accumulates lines until a blank line or block-level token is encountered.
 5. List items push/pop the indent stack as depth changes.
 6. Code and math blocks are consumed as opaque content — no further parsing inside them at this stage.
+7. Table parsing recognizes pipe-delimited Markdown rows with a dash delimiter row. Rows before the delimiter are table headers; multiple pre-delimiter rows create multi-row headers. Delimiter colons set per-column alignment.
+8. Table cell merge markers are resolved during block parsing. `>` and `<` extend the visible cell to the left, and `^` extends the visible cell above. Escaped `\>`, `\<`, and `\^` remain literal content. The resolved span grid must be rectangular, otherwise parsing fails.
+9. A dash-only column across table rows is treated as a vertical header separator. The separator column is omitted, and body cells to its left are emitted as row header cells.
 
 ---
 
