@@ -81,6 +81,8 @@ If the opening fence is indented (e.g. inside a list),
 
 **Links:** `[link text](url)`. The URL can contain literal parentheses; only the first matching `)` closes the URL, so trailing `)` in the URL are kept (author should encode if needed). Example: [example.com](https://example.com) and [URL with parens](https://example.com/path(a)b).
 
+Plain brackets are text unless followed by URL parentheses: [not a link]. To write literal link-shaped text, escape the closing bracket: [not a link\](https://example.com).
+
 **Footnotes / citations:** `^[note text](url)`. They are **auto-numbered** in document order. Output is typically a superscript link to the note; a consolidated list of notes (bibliography) appears at the end. Example: a claim^[Source: [doc](https://example.com/doc)] and another^[Second note](https://example.com/two).
 
 ---
@@ -100,6 +102,8 @@ Math is **not** parsed as Kernel ML; only TeX-style math is interpreted inside. 
 - **Dollar:** `$...$` for inline math. Example: We have $x^2 + y^2 = z^2$ here.
 - **Parens:** `\(...\)` for inline math. Example: Or \( \int_0^1 f(x)\,dx \) like this.
 
+A literal dollar sign uses an escape: US\$50 renders as text, not math.
+
 Document macros (e.g. `\n`) **do not** expand inside math; the pre-lexer finds math/code regions before macro expansion.
 
 ---
@@ -118,6 +122,8 @@ $$
 \[
 \int_0^{2\pi} \sin^2 x\,dx = \pi
 \]
+
+Bracket display math can also split paragraph text: before \[a^2 + b^2 = c^2\] after.
 
 ---
 

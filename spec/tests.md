@@ -111,9 +111,14 @@ Another one^[ref](https://example.com/x))
 - next item
 ```
 
+```markdown
+Before \[x + y\] after.
+```
+
 * Checks:
 
   * Display math respects indentation of enclosing list.
+  * Bracket display math can split paragraph text into paragraph/display/paragraph.
   * Inline parsing suppressed inside math.
   * Paragraphs inside list items remain consistent.
 
@@ -181,3 +186,23 @@ See #[1] and #[2]
   * Dash-only separator columns create vertical row headers and are omitted.
   * `>`, `<`, and `^` markers produce rectangular `colspan`/`rowspan` output.
   * Escaped markers render literally.
+
+---
+
+### **12. Escaped inline delimiters and literal link-shaped text**
+
+```markdown
+Price is US\$50, not inline math.
+Plain [brackets] are not links.
+Literal link-shaped text: [not a link\](https://example.com).
+\*not italic\*, \`not code\`, \^{not superscript}, and \_{not subscript}.
+Literal line-break macro: \\n.
+```
+
+* Checks:
+
+  * `\$` renders a literal dollar sign and does not start math.
+  * `[label]` is ordinary text unless followed by URL parentheses.
+  * Escaping the closing bracket prevents `[label](url)` from becoming a link.
+  * Escaped formatting/code/sup/sub delimiters render literally.
+  * `\\n` renders literal `\n`; only unescaped `\n` expands to `<br>`.

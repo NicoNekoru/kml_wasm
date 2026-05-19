@@ -56,6 +56,7 @@ where `SpanKind ∈ { Normal, MathInline, MathDisplay, CodeInline, CodeDisplay }
 Key rules:
 - Code delimiters take priority over math delimiters (checked first).
 - Transitions are only valid from `normal` mode — no nesting.
+- Opening and closing delimiters only count when they are unescaped. Escaping is defined by an odd number of immediately preceding backslashes.
 - Unmatched delimiters -> immediate compile error with position.
 
 ---
@@ -68,6 +69,7 @@ Key rules:
 - Macro table is append-only and ordered.
 - A macro may only reference macros defined strictly before it.
 - Expansion is single-depth textual substitution — no re-scanning of expanded text.
+- Normal-span macro expansion is escape-aware: unescaped `\n` becomes `<br>`, while `\\n` remains literal text.
 - Output is a new source string with the same span annotations adjusted for any length changes.
 
 ---
@@ -99,6 +101,7 @@ Algorithm:
 7. Table parsing recognizes pipe-delimited Markdown rows with a dash delimiter row. Rows before the delimiter are table headers; multiple pre-delimiter rows create multi-row headers. Delimiter colons set per-column alignment.
 8. Table cell merge markers are resolved during block parsing. `>` and `<` extend the visible cell to the left, and `^` extends the visible cell above. Escaped `\>`, `\<`, and `\^` remain literal content. The resolved span grid must be rectangular, otherwise parsing fails.
 9. A dash-only column across table rows is treated as a vertical header separator. The separator column is omitted, and body cells to its left are emitted as row header cells.
+10. Paragraph text is split around unescaped `$$...$$` and `\[...\]` display-math spans. Text before and after the span becomes paragraph blocks.
 
 ---
 
@@ -120,12 +123,13 @@ Inline =
 ```
 
 Algorithm:
-1. Scan left to right, tokenizing delimiters (`**`, `*`, `` ` ``, `$`, `\(`, `[`, `^{`, `_{`).
+1. Scan left to right, tokenizing unescaped delimiters (`**`, `*`, `` ` ``, `$`, `\(`, `[`, `^{`, `_{`).
 2. On opening token, push frame onto stack: `Frame { kind, start_pos }`.
 3. On closing token, pop matching frame and emit inline node.
 4. If closing token has no matching open frame -> compile error.
 5. If end of input with non-empty stack -> compile error.
 6. On code or math open token, enter suppression mode: consume raw characters until matching close, emit opaque inline node, exit suppression mode.
+7. Escaped delimiters are emitted as text with the escape backslash removed. Plain `[label]` is text; only `[label](url)` emits a link. Literal link-shaped text is written by escaping the closing bracket: `[label\](url)`.
 
 ---
 

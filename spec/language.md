@@ -11,13 +11,27 @@ We are designing a markup language that is designed for technical blogposts whic
 3. Indentation is **strict after the first nested list**:  
    - The first indented list item sets the file-wide indent unit (tab, 2-spaces, 4-spaces, …).  
    - Any later inconsistent indentation is a compile-time error.  
-4. Macro expansion is a single pre-pass, top-to-bottom, textual, **before** any parsing.  
+4. Macro expansion is a single pass after pre-lexing and before block/inline parsing.
    - Document macros use `\name`; they **do not** expand inside math regions.  
-   - Math regions are identified **before** macro expansion by a fast pre-lexer that only looks for `$...$`, `$$...$$`, `\(...\)`, `\[...\]`.  
+   - Math regions are identified **before** macro expansion by a fast pre-lexer that only looks for unescaped `$...$`, `$$...$$`, `\(...\)`, `\[...\]`.
    - Inside math, only TeX macros (loaded from sty files) are recognised.  
 
 # Syntax
 All of these will be given in some regular expression, since it is an easy way to represent the specific pattern. This does not necessarily imply that parsing should be done via regular expression
+
+## Escapes
+
+In normal text, a backslash escapes the next delimiter character. The backslash is removed and the next character is emitted literally. Escape handling is based on an odd number of immediately preceding backslashes: `\$` is a literal dollar sign, while `\\$...$` leaves the dollar sign active because the dollar is preceded by two backslashes.
+
+Escapable inline characters are `\`, `$`, `*`, `` ` ``, `[`, `]`, `^`, `_`, `{`, `}`, `(`, `)`, `<`, `>`, and `|`.
+
+Important cases:
+- `\$50` renders as `$50` and does not start inline math.
+- `\\n` renders as the literal text `\n`; unescaped `\n` expands to `<br>`.
+- `[label]` is ordinary text unless it is immediately followed by `(url)`.
+- `[label](url)` is a hyperlink. To write literal link-shaped text, escape the closing bracket: `[label\](url)`.
+- `\[` and `\]` are display-math delimiters, not the preferred way to write literal brackets. Use plain brackets for ordinary text, or `\\[` / `\\]` if the literal backslash-bracket sequence is required.
+
 * /\*(.+?)\*/ -- (*text*) for italics.
 * /\*\*(.+?)\*\*/ -- (**text**) for bold.
     - Bold may contain italics; italics may contain bold.  
@@ -44,6 +58,8 @@ All of these will be given in some regular expression, since it is an easy way t
     * NOTE: Closing fence must match the indentation of the opening fence.
 * /\[(.+?)\]\(.*?\)/ -- ([link](href)) for hyperlinks
     - URLs may contain literal parentheses; unmatched closing parentheses are **kept** in the URL (author must encode if full match is desired).  
+    - Plain brackets without a following URL, e.g. `[label]`, are normal text.
+    - Escape the closing bracket for literal link-shaped text: `[label\](href)`.
 * /\^\{(.*?)\}/ -- (text^{sup}) for superscript
 * /\_\{(.*?)\}/ -- (text_{sub}) for subscript
     - Braces must be balanced; `\{` and `\}` are allowed.  
@@ -54,6 +70,7 @@ All of these will be given in some regular expression, since it is an easy way t
 * /\\\((.*?)\\\)|\$(.*?)\$/ -- (\(text\) or $text$) for inline math environments
 * /\\\[((.|\n)*?)\\\]|\$\$((.|\n)*?)\$\$/ -- (\[ \n text\] or $$text\n$$) for display math environments
     - Display math is a block; its bounding box inherits the indentation of its opening delimiter.  
+    - A display-math span may appear inside paragraph text; it splits the surrounding text into paragraph/display/paragraph blocks.
 * /\(\w+) / -- (\macro) for document macros
     - Expanded only outside math; inside math, only TeX macros are recognised.  
 * /\n\n|\\n/ -- (\n\n) for newlines
