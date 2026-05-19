@@ -4,6 +4,7 @@
 mod ast;
 mod block;
 mod emit;
+mod escape;
 mod inline;
 mod live;
 mod macros;
@@ -263,6 +264,99 @@ This is a new paragraph."#;
             out.contains("x^2"),
             "should contain math content; got: {}",
             out
+        );
+    }
+
+    #[test]
+    fn test_escaped_dollar_renders_literal_text() {
+        let source = r#"Price is US\$50, not math."#;
+        let out = compile_inner(source).expect("escaped dollar must compile");
+        assert!(
+            out.contains("<p>Price is US$50, not math.</p>"),
+            "escaped dollar should render literally; got: {out}"
+        );
+        assert!(
+            !out.contains("math-inline"),
+            "escaped dollar should not open inline math; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_escaped_inline_delimiters_render_literal_text() {
+        let source =
+            r#"\*not italic\* [not a link] [literal\](x) \^{not sup} \_{not sub} \`not code\`"#;
+        let out = compile_inner(source).expect("escaped inline delimiters must compile");
+        assert!(
+            out.contains("*not italic* [not a link] [literal](x) ^{not sup} _{not sub} `not code`"),
+            "escaped delimiters should render literally; got: {out}"
+        );
+        assert!(!out.contains("<em>"), "escaped * should not emit em: {out}");
+        assert!(
+            !out.contains("<a "),
+            "escaped [ should not emit link: {out}"
+        );
+        assert!(
+            !out.contains("<sup>") && !out.contains("<sub>"),
+            "escaped sup/sub should not emit tags: {out}"
+        );
+        assert!(
+            !out.contains("<code>"),
+            "escaped backtick should not emit code: {out}"
+        );
+    }
+
+    #[test]
+    fn test_plain_brackets_are_text_unless_followed_by_url() {
+        let source = r#"Plain [brackets] and [a link](https://example.com)."#;
+        let out = compile_inner(source).expect("plain brackets and link must compile");
+        assert!(
+            out.contains("Plain [brackets] and "),
+            "plain brackets should render as text; got: {out}"
+        );
+        assert!(
+            out.contains(r#"<a href="https://example.com">a link</a>"#),
+            "brackets followed by URL parens should render as a link; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_bracket_display_math_splits_paragraph() {
+        let source = r#"Before \[x + y\] after."#;
+        let out = compile_inner(source).expect("bracket display math must compile");
+        assert!(
+            out.contains(
+                "<p>Before</p>\n<div class=\"math math-display\">\\[x + y\\]</div>\n<p>after.</p>"
+            ),
+            "bracket display math should split paragraph; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_escaped_dollar_inside_inline_math_does_not_close_math() {
+        let source = r#"Math $x\$y$ done."#;
+        let out = compile_inner(source).expect("escaped dollar inside math must compile");
+        assert!(
+            out.contains(r#"<span class="math math-inline">\(x\$y\)</span>"#),
+            "escaped dollar should remain inside math content; got: {out}"
+        );
+        assert_eq!(
+            out.matches("math-inline").count(),
+            1,
+            "expected one inline math span; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_escaped_linebreak_macro_renders_literal_marker() {
+        let source = r#"Literal \\n marker."#;
+        let out = compile_inner(source).expect("escaped linebreak macro must compile");
+        assert!(
+            out.contains("<p>Literal \\n marker.</p>"),
+            "escaped linebreak macro should render as literal \\n; got: {out}"
+        );
+        assert!(
+            !out.contains("<br>"),
+            "escaped linebreak macro should not emit a break; got: {out}"
         );
     }
 

@@ -2,6 +2,7 @@
 //! Bold, italic, code, link, inline math, footnote, sup, sub. Suppression inside code/math.
 
 use crate::ast::Inline;
+use crate::escape::{find_unescaped_sequence, is_escaped_at};
 use crate::prelex::CompileError;
 use std::result::Result;
 
@@ -19,7 +20,7 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i += 4; // <br> is 4 chars
             continue;
         }
-        if chars[i] == '`' {
+        if chars[i] == '`' && !is_escaped_at(text, char_offset_to_byte(text, i)) {
             let close_char = find_closing_backticks(text, i).ok_or_else(|| CompileError {
                 message: "Unclosed inline code".into(),
                 offset: 0,
@@ -31,7 +32,10 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i = close_char + 1;
             continue;
         }
-        if chars[i] == '$' && (i + 1 >= char_count || chars[i + 1] != '$') {
+        if chars[i] == '$'
+            && (i + 1 >= char_count || chars[i + 1] != '$')
+            && !is_escaped_at(text, char_offset_to_byte(text, i))
+        {
             let close = find_dollar_close(text, i);
             let close_char = close.ok_or_else(|| CompileError {
                 message: "Unclosed inline math".into(),
@@ -45,23 +49,31 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i = close_char + 1;
             continue;
         }
-        if rest.starts_with("\\(") {
-            let close_byte = rest.find("\\)").ok_or_else(|| CompileError {
-                message: "Unclosed \\( math".into(),
-                offset: 0,
-            })?;
-            let content = rest[2..close_byte].trim().to_string();
-            let consumed_chars = rest[..close_byte + 2].chars().count();
+        if rest.starts_with("\\(") && !is_escaped_at(text, char_offset_to_byte(text, i)) {
+            let open_byte = char_offset_to_byte(text, i);
+            let close_byte =
+                find_unescaped_sequence(text, open_byte + 2, "\\)").ok_or_else(|| {
+                    CompileError {
+                        message: "Unclosed \\( math".into(),
+                        offset: 0,
+                    }
+                })?;
+            let content = text[open_byte + 2..close_byte].trim().to_string();
+            let consumed_chars = text[open_byte..close_byte + 2].chars().count();
             result.push(Inline::InlineMath { content });
             i += consumed_chars;
             continue;
         }
-        if rest.starts_with("**") {
-            let after_open = &rest[2..];
+        if chars[i] == '\\' && i + 1 < char_count && is_escapable_inline_char(chars[i + 1]) {
+            result.push(Inline::Text {
+                content: chars[i + 1].to_string(),
+            });
+            i += 2;
+            continue;
+        }
+        if rest.starts_with("**") && !is_escaped_at(text, char_offset_to_byte(text, i)) {
             let inner_start_byte = char_offset_to_byte(text, i + 2);
-            let close_char = after_open
-                .find("**")
-                .map(|cb| i + 2 + after_open[..cb].chars().count());
+            let close_char = find_closing_double_star(text, i + 2);
             let close_char = close_char.ok_or_else(|| CompileError {
                 message: "Unclosed **".into(),
                 offset: 0,
@@ -72,7 +84,10 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i = close_char + 2;
             continue;
         }
-        if chars[i] == '*' && (i + 1 >= char_count || chars[i + 1] != '*') {
+        if chars[i] == '*'
+            && (i + 1 >= char_count || chars[i + 1] != '*')
+            && !is_escaped_at(text, char_offset_to_byte(text, i))
+        {
             let close = find_closing_star(text, i + 1);
             let close_char = close.ok_or_else(|| CompileError {
                 message: "Unclosed *".into(),
@@ -85,14 +100,14 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i = close_char + 1;
             continue;
         }
-        if rest.starts_with("^[") {
+        if rest.starts_with("^[") && !is_escaped_at(text, char_offset_to_byte(text, i)) {
             if let Some((note, href, consumed)) = parse_footnote_impl(text, i) {
                 result.push(Inline::Footnote { note, href });
                 i += consumed;
                 continue;
             }
         }
-        if chars[i] == '[' {
+        if chars[i] == '[' && !is_escaped_at(text, char_offset_to_byte(text, i)) {
             if let Some((link_text, href, consumed)) = parse_link(text, i) {
                 result.push(Inline::Link {
                     text: link_text,
@@ -102,7 +117,7 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
                 continue;
             }
         }
-        if rest.starts_with("^{") {
+        if rest.starts_with("^{") && !is_escaped_at(text, char_offset_to_byte(text, i)) {
             let end = find_balanced_braces(text, i);
             let end_char = end.ok_or_else(|| CompileError {
                 message: "Unclosed ^{".into(),
@@ -115,7 +130,7 @@ pub fn parse_inline(text: &str) -> Result<Vec<Inline>, CompileError> {
             i = end_char + 1;
             continue;
         }
-        if rest.starts_with("_{") {
+        if rest.starts_with("_{") && !is_escaped_at(text, char_offset_to_byte(text, i)) {
             let end = find_balanced_braces(text, i);
             let end_char = end.ok_or_else(|| CompileError {
                 message: "Unclosed _{".into(),
@@ -148,12 +163,20 @@ fn char_offset_to_byte(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+fn is_escapable_inline_char(c: char) -> bool {
+    matches!(
+        c,
+        '\\' | '$' | '*' | '`' | '[' | ']' | '^' | '_' | '{' | '}' | '(' | ')' | '<' | '>' | '|'
+    )
+}
+
 fn find_closing_backticks(text: &str, start_char: usize) -> Option<usize> {
     let start_byte = char_offset_to_byte(text, start_char);
     let after = &text[start_byte + 1..];
     let mut char_idx = start_char + 1;
-    for (_, c) in after.char_indices() {
-        if c == '`' {
+    for (byte_offset, c) in after.char_indices() {
+        let byte_idx = start_byte + 1 + byte_offset;
+        if c == '`' && !is_escaped_at(text, byte_idx) {
             return Some(char_idx);
         }
         char_idx += 1;
@@ -165,8 +188,9 @@ fn find_dollar_close(text: &str, start_char: usize) -> Option<usize> {
     let start_byte = char_offset_to_byte(text, start_char);
     let after = &text[start_byte + 1..];
     let mut char_idx = start_char + 1;
-    for (_, c) in after.char_indices() {
-        if c == '$' {
+    for (byte_offset, c) in after.char_indices() {
+        let byte_idx = start_byte + 1 + byte_offset;
+        if c == '$' && !is_escaped_at(text, byte_idx) {
             return Some(char_idx);
         }
         char_idx += 1;
@@ -175,10 +199,29 @@ fn find_dollar_close(text: &str, start_char: usize) -> Option<usize> {
 }
 
 fn find_closing_star(text: &str, start_char: usize) -> Option<usize> {
-    let chars: Vec<char> = text.chars().collect();
-    for i in start_char..chars.len() {
-        if chars[i] == '*' && (i == 0 || chars[i - 1] != '*') {
-            return Some(i);
+    let total_chars = text.chars().count();
+    let mut char_idx = start_char;
+    while char_idx < total_chars {
+        let byte_idx = char_offset_to_byte(text, char_idx);
+        let rest = &text[byte_idx..];
+        if rest.starts_with("**") && !is_escaped_at(text, byte_idx) {
+            char_idx += 2;
+            continue;
+        }
+        if rest.starts_with('*') && !is_escaped_at(text, byte_idx) {
+            return Some(char_idx);
+        }
+        char_idx += 1;
+    }
+    None
+}
+
+fn find_closing_double_star(text: &str, start_char: usize) -> Option<usize> {
+    for char_idx in start_char..text.chars().count() {
+        let byte_idx = char_offset_to_byte(text, char_idx);
+        let rest = &text[byte_idx..];
+        if rest.starts_with("**") && !is_escaped_at(text, byte_idx) {
+            return Some(char_idx);
         }
     }
     None
@@ -216,7 +259,7 @@ fn parse_link(text: &str, start_char: usize) -> Option<(String, String, usize)> 
     if !rest.starts_with('[') {
         return None;
     }
-    let close_bracket = rest.find(']')?;
+    let close_bracket = find_unescaped_sequence(text, start_byte + 1, "]")? - start_byte;
     let text_content = rest[1..close_bracket].to_string();
     let after = &rest[close_bracket..];
     if !after.starts_with("](") {
@@ -227,9 +270,10 @@ fn parse_link(text: &str, start_char: usize) -> Option<(String, String, usize)> 
     let mut i = paren_start;
     let bytes = after.as_bytes();
     while i < bytes.len() {
-        if bytes[i] == b'(' {
+        let absolute_i = start_byte + close_bracket + i;
+        if bytes[i] == b'(' && !is_escaped_at(text, absolute_i) {
             paren_depth += 1;
-        } else if bytes[i] == b')' {
+        } else if bytes[i] == b')' && !is_escaped_at(text, absolute_i) {
             paren_depth -= 1;
             if paren_depth == 0 {
                 let href = after[paren_start..i].to_string();
@@ -258,9 +302,10 @@ pub(crate) fn parse_footnote_impl(
     let bytes = rest.as_bytes();
     for pos in 2..bytes.len() {
         let b = bytes[pos];
-        if b == b'[' {
+        let absolute_pos = start_byte + pos;
+        if b == b'[' && !is_escaped_at(text, absolute_pos) {
             depth += 1;
-        } else if b == b']' {
+        } else if b == b']' && !is_escaped_at(text, absolute_pos) {
             depth -= 1;
             if depth == 0 {
                 close_bracket_byte = Some(pos);
@@ -276,9 +321,10 @@ pub(crate) fn parse_footnote_impl(
         let mut close_paren_byte = None;
         let after_url = &after[2..];
         for (pos, b) in after_url.bytes().enumerate() {
-            if b == b'(' {
+            let absolute_pos = start_byte + close_bracket + 2 + pos;
+            if b == b'(' && !is_escaped_at(text, absolute_pos) {
                 paren_depth += 1;
-            } else if b == b')' {
+            } else if b == b')' && !is_escaped_at(text, absolute_pos) {
                 paren_depth -= 1;
                 if paren_depth == 0 {
                     close_paren_byte = Some(pos);
@@ -325,27 +371,38 @@ fn next_inline_delimiter(text: &str, start_char: usize) -> usize {
     for char_idx in start_char..total_chars {
         let byte_start = char_offset_to_byte(text, char_idx);
         let rest = &text[byte_start..];
+        if let Some(c) = rest.chars().next() {
+            if c == '\\' {
+                if let Some(next) = rest.chars().nth(1) {
+                    if is_escapable_inline_char(next) {
+                        return char_idx;
+                    }
+                }
+            }
+        }
         if rest.starts_with("<br>")
             || rest.starts_with("**")
             || rest.starts_with("\\(")
             || rest.starts_with("^{")
             || rest.starts_with("_{")
         {
-            return char_idx;
-        }
-        if let Some(c) = rest.chars().next() {
-            if c == '`' || c == '[' {
+            if !is_escaped_at(text, byte_start) {
                 return char_idx;
             }
-            if c == '^' && rest.chars().nth(1) == Some('[') {
+        }
+        if let Some(c) = rest.chars().next() {
+            if (c == '`' || c == '[') && !is_escaped_at(text, byte_start) {
+                return char_idx;
+            }
+            if c == '^' && rest.chars().nth(1) == Some('[') && !is_escaped_at(text, byte_start) {
                 return char_idx;
             }
             if c == '$' && rest.chars().nth(1) != Some('$') {
-                if char_idx == 0 || text[..byte_start].chars().last() != Some('\\') {
+                if !is_escaped_at(text, byte_start) {
                     return char_idx;
                 }
             }
-            if c == '*' && rest.chars().nth(1) != Some('*') {
+            if c == '*' && rest.chars().nth(1) != Some('*') && !is_escaped_at(text, byte_start) {
                 return char_idx;
             }
         }

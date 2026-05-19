@@ -2,6 +2,7 @@
 //! Frontmatter, headings, lists, code blocks, display math, paragraphs.
 
 use crate::ast::{Block, Inline, ListItem, TableAlignment, TableCell, TableRow};
+use crate::escape::{find_unescaped_sequence, is_escaped_at};
 use crate::inline::parse_inline;
 use crate::prelex::CompileError;
 use std::result::Result;
@@ -59,10 +60,22 @@ pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), Compil
         // - Single-line $$...$$ (possibly indented, e.g. inside a list)
         // - Multi-line $$ on its own lines, or \[ ... \] form
         if trimmed.starts_with("$$") {
-            if let Some(close_idx) = trimmed[2..].find("$$") {
-                let content = trimmed[2..2 + close_idx].trim().to_string();
+            if let Some(close_idx) = find_unescaped_sequence(trimmed, 2, "$$") {
+                let content = trimmed[2..close_idx].trim().to_string();
                 blocks.push(Block::DisplayMath { content });
-                let tail = trimmed[2 + close_idx + 2..].trim();
+                let tail = trimmed[close_idx + 2..].trim();
+                if !tail.is_empty() {
+                    blocks.extend(parse_paragraph_text(tail)?);
+                }
+                i += 1;
+                continue;
+            }
+        }
+        if trimmed.starts_with("\\[") {
+            if let Some(close_idx) = find_unescaped_sequence(trimmed, 2, "\\]") {
+                let content = trimmed[2..close_idx].trim().to_string();
+                blocks.push(Block::DisplayMath { content });
+                let tail = trimmed[close_idx + 2..].trim();
                 if !tail.is_empty() {
                     blocks.extend(parse_paragraph_text(tail)?);
                 }
@@ -437,22 +450,6 @@ fn ends_with_table_pipe(line: &str) -> bool {
         .rev()
         .find(|(_, c)| !c.is_whitespace())
         .is_some_and(|(idx, c)| c == '|' && !is_escaped_at(line, idx))
-}
-
-fn is_escaped_at(s: &str, byte_idx: usize) -> bool {
-    let mut slash_count = 0usize;
-    let mut i = byte_idx;
-    while i > 0 {
-        let Some((prev_idx, ch)) = s[..i].char_indices().next_back() else {
-            break;
-        };
-        if ch != '\\' {
-            break;
-        }
-        slash_count += 1;
-        i = prev_idx;
-    }
-    slash_count % 2 == 1
 }
 
 fn count_char_run(s: &str, byte_idx: usize, needle: char) -> usize {
@@ -919,10 +916,22 @@ fn parse_list_item(
         // - Single-line $$...$$ (at this indent)
         // - Multi-line $$ on its own line, or \[ ... \] form
         if trimmed.starts_with("$$") {
-            if let Some(close_idx) = trimmed[2..].find("$$") {
-                let content = trimmed[2..2 + close_idx].trim().to_string();
+            if let Some(close_idx) = find_unescaped_sequence(trimmed, 2, "$$") {
+                let content = trimmed[2..close_idx].trim().to_string();
                 blocks.push(Block::DisplayMath { content });
-                let tail = trimmed[2 + close_idx + 2..].trim();
+                let tail = trimmed[close_idx + 2..].trim();
+                if !tail.is_empty() {
+                    blocks.extend(parse_paragraph_text(tail)?);
+                }
+                i += 1;
+                continue;
+            }
+        }
+        if trimmed.starts_with("\\[") {
+            if let Some(close_idx) = find_unescaped_sequence(trimmed, 2, "\\]") {
+                let content = trimmed[2..close_idx].trim().to_string();
+                blocks.push(Block::DisplayMath { content });
+                let tail = trimmed[close_idx + 2..].trim();
                 if !tail.is_empty() {
                     blocks.extend(parse_paragraph_text(tail)?);
                 }
@@ -1003,16 +1012,23 @@ fn find_display_math_span(
 ) -> Result<Option<(usize, usize, usize)>, CompileError> {
     let mut i = start;
     while i < text.len() {
-        if text[i..].starts_with('`') {
+        if text[i..].starts_with('`') && !is_escaped_at(text, i) {
             i = skip_backtick_span(text, i);
             continue;
         }
-        if text[i..].starts_with("$$") {
-            let close = text[i + 2..].find("$$").ok_or_else(|| CompileError {
+        if text[i..].starts_with("$$") && !is_escaped_at(text, i) {
+            let close = find_unescaped_sequence(text, i + 2, "$$").ok_or_else(|| CompileError {
                 message: "Unclosed $$ math".into(),
                 offset: i,
-            })? + i
-                + 2;
+            })?;
+            return Ok(Some((i, close, close + 2)));
+        }
+        if text[i..].starts_with("\\[") && !is_escaped_at(text, i) {
+            let close =
+                find_unescaped_sequence(text, i + 2, "\\]").ok_or_else(|| CompileError {
+                    message: "Unclosed \\[ math".into(),
+                    offset: i,
+                })?;
             return Ok(Some((i, close, close + 2)));
         }
         i += text[i..].chars().next().map(char::len_utf8).unwrap_or(1);
@@ -1027,9 +1043,8 @@ fn skip_backtick_span(text: &str, start: usize) -> usize {
     }
     let fence = "`".repeat(run);
     let content_start = start + run;
-    text[content_start..]
-        .find(&fence)
-        .map(|close| content_start + close + run)
+    find_unescaped_sequence(text, content_start, &fence)
+        .map(|close| close + run)
         .unwrap_or(content_start)
 }
 

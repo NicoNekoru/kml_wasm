@@ -2,6 +2,8 @@
 //! Code delimiters take priority over math. No nesting.
 //! All span positions are byte offsets.
 
+use crate::escape::is_escaped_at;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpanKind {
     Normal,
@@ -101,7 +103,7 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
 
         match mode {
             Mode::CodeInline => {
-                if c == '`' {
+                if c == '`' && !is_escaped_at(source, i) {
                     let backticks = count_run_backticks(source, i);
                     if backticks >= code_inline_len {
                         let step_full = byte_len_backticks(source, i, backticks);
@@ -143,7 +145,7 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                 i += c_len;
             }
             Mode::CodeDisplay => {
-                if rest.starts_with("```") {
+                if rest.starts_with("```") && !is_escaped_at(source, i) {
                     do_end_span(
                         &mut spans,
                         &mut span_start,
@@ -157,7 +159,7 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                 i += c_len;
             }
             Mode::MathInline => {
-                if rest.starts_with("\\)") {
+                if rest.starts_with("\\)") && !is_escaped_at(source, i) {
                     do_end_span(
                         &mut spans,
                         &mut span_start,
@@ -168,7 +170,7 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                     i += 2;
                     continue;
                 }
-                if c == '$' && (i == 0 || source[..i].chars().last() != Some('\\')) {
+                if c == '$' && !is_escaped_at(source, i) {
                     let next_pos = i + c_len;
                     if next_pos < n {
                         let next_ch = peek_non_space(source, next_pos);
@@ -198,7 +200,7 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                 i += c_len;
             }
             Mode::MathDisplay => {
-                if rest.starts_with("\\]") {
+                if rest.starts_with("\\]") && !is_escaped_at(source, i) {
                     do_end_span(
                         &mut spans,
                         &mut span_start,
@@ -209,7 +211,7 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                     i += 2;
                     continue;
                 }
-                if rest.starts_with("$$") {
+                if rest.starts_with("$$") && !is_escaped_at(source, i) {
                     do_end_span(
                         &mut spans,
                         &mut span_start,
@@ -223,13 +225,13 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                 i += c_len;
             }
             Mode::Normal => {
-                if rest.starts_with("```") {
+                if rest.starts_with("```") && !is_escaped_at(source, i) {
                     do_start_span(&mut spans, &mut span_start, i);
                     i += 3;
                     mode = Mode::CodeDisplay;
                     continue;
                 }
-                if c == '`' {
+                if c == '`' && !is_escaped_at(source, i) {
                     let backticks = count_run_backticks(source, i);
                     if backticks >= 1 {
                         code_inline_len = if backticks >= 3 { 3 } else { backticks };
@@ -246,19 +248,19 @@ pub fn pre_lex(source: &str) -> Result<Vec<Span>, CompileError> {
                         continue;
                     }
                 }
-                if rest.starts_with("\\(") {
+                if rest.starts_with("\\(") && !is_escaped_at(source, i) {
                     do_start_span(&mut spans, &mut span_start, i);
                     i += 2;
                     mode = Mode::MathInline;
                     continue;
                 }
-                if rest.starts_with("\\[") {
+                if rest.starts_with("\\[") && !is_escaped_at(source, i) {
                     do_start_span(&mut spans, &mut span_start, i);
                     i += 2;
                     mode = Mode::MathDisplay;
                     continue;
                 }
-                if c == '$' {
+                if c == '$' && !is_escaped_at(source, i) {
                     if rest.starts_with("$$") {
                         do_start_span(&mut spans, &mut span_start, i);
                         i += 2;
