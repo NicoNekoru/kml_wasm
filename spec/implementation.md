@@ -82,8 +82,9 @@ Consumes the post-expansion source line by line. Maintains an indentation stack.
 Block =
   | Heading { level, id, text }
   | Paragraph { inlines }
-  | List { ordered, style, items: [ListItem] }
-  | ListItem { depth, blocks: [Block] }
+  | List { ordered, items: [ListItem] }
+  | ListItem { marker, blocks: [Block] }
+  | Blockquote { blocks: [Block] }
   | Table { rows: [TableRow], header_rows }
   | CodeBlock { lang, content }
   | DisplayMath { content }
@@ -94,14 +95,16 @@ Block =
 Algorithm:
 1. If first line is `---`, consume until closing `---` as frontmatter.
 2. For each line, determine its indent level against the indent stack.
-3. Dispatch to sub-parsers based on the line's leading token or row shape (`#`, `-`, table rows, ` ``` `, `$$`, `\[`, or plain text).
+3. Dispatch to sub-parsers based on the line's leading token or row shape (`#`, `-`, `>`, table rows, ` ``` `, `$$`, `\[`, or plain text).
 4. Paragraph accumulates lines until a blank line or block-level token is encountered.
 5. List items push/pop the indent stack as depth changes.
-6. Code and math blocks are consumed as opaque content — no further parsing inside them at this stage.
-7. Table parsing recognizes pipe-delimited Markdown rows with a dash delimiter row. Rows before the delimiter are table headers; multiple pre-delimiter rows create multi-row headers. Delimiter colons set per-column alignment.
-8. Table cell merge markers are resolved during block parsing. `>` and `<` extend the visible cell to the left, and `^` extends the visible cell above. Escaped `\>`, `\<`, and `\^` remain literal content. The resolved span grid must be rectangular, otherwise parsing fails.
-9. A dash-only column across table rows is treated as a vertical header separator. The separator column is omitted, and body cells to its left are emitted as row header cells.
-10. Paragraph text is split around unescaped `$$...$$` and `\[...\]` display-math spans. Text before and after the span becomes paragraph blocks.
+6. Ordered list parsing maintains a per-list marker state. Explicit markers such as `=[4]`, `=[a:i]`, `=[a):i]`, or `=[Problem {a}:i]` resolve the current item marker and reset the continuation template. Bare `=` renders the current template at the next value; at list start it defaults to arabic `1.`.
+7. Code and math blocks are consumed as opaque content — no further parsing inside them at this stage.
+8. Table parsing recognizes pipe-delimited Markdown rows with a dash delimiter row. Rows before the delimiter are table headers; multiple pre-delimiter rows create multi-row headers. Delimiter colons set per-column alignment.
+9. Table cell merge markers are resolved during block parsing. `>` and `<` extend the visible cell to the left, and `^` extends the visible cell above. Escaped `\>`, `\<`, and `\^` remain literal content. The resolved span grid must be rectangular, otherwise parsing fails.
+10. A dash-only column across table rows is treated as a vertical header separator. The separator column is omitted, and body cells to its left are emitted as row header cells.
+11. Paragraph text is split around unescaped `$$...$$` and `\[...\]` display-math spans. Text before and after the span becomes paragraph blocks.
+12. Blockquotes strip one `>` marker and an optional following space from each quoted line, then recursively run block parsing on the stripped content. This is why `> > > ```lang` works: each quote layer removes one marker, then the code fence is parsed normally with its raw content padding stripped by the code-block parser.
 
 ---
 

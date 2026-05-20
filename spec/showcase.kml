@@ -129,20 +129,40 @@ Bracket display math can also split paragraph text: before \[a^2 + b^2 = c^2\] a
 
 # Lists
 
-**Unordered lists:** line starts with `- ` (dash and space). **Ordered lists:** `=[a]`, `=[i]`, or `=[1]` for alphabetic, roman, or arabic. The **first nested item** sets the **file-wide indent unit** (e.g. 4 spaces); later inconsistent indentation is a compile-time error. At each depth, that many indent units define the "line start," so you can nest code blocks, display math, and sub-lists.
+**Unordered lists:** line starts with `- ` (dash and space). **Ordered lists:** `=` continues the current ordered marker. Use `=[1]`, `=[a]`, `=[A]`, `=[i]`, or `=[I]` to set numeric, alphabetic, or roman markers; add `:value` to start elsewhere, as in `=[a:i]`. Verbose markers use one counter slot, such as `=[Problem {a}:i]`. The **first nested item** sets the **file-wide indent unit** (e.g. 4 spaces); later inconsistent indentation is a compile-time error. At each depth, that many indent units define the "line start," so you can nest code blocks, display math, and sub-lists.
 
 - first unordered item
 - second item
     =[a] nested ordered (alphabetic)
-    =[a] second at same depth
-    =[1] arabic style
+    = second at same depth
+    =[4] explicit numeric jump
         - deeply nested bullet
         ```python
         def nested():
             return 42
         ```
         $$\sum_{k=0}^{\infty} \frac{1}{2^k} = 2$$
-    =[i] back to roman
+    = numeric continuation after the jump
+    =[a:i] alphabetic item starting at i
+    =[a):j] alphabetic suffix marker
+    =[Problem {a}:i] verbose marker
+    = verbose continuation
+
+---
+
+# Blockquotes
+
+Blockquotes use `> ` at the start of each quoted line. The quoted content is parsed as a new block, so headings, lists, math, and code fences work inside it.
+
+> A blockquote can contain **inline formatting** and $x^2$.
+> #[2] Heading inside a blockquote
+> - list item inside a blockquote
+
+Nested quote markers create nested blockquotes:
+
+> > > ```text
+> > >     deeply quoted code
+> > > ```
 
 ---
 
@@ -154,11 +174,11 @@ If the **first line** is `---`, the parser reads until the next `---` as **front
 
 # Parsing and compilation rules (summary)
 
-=1. **Pre-lex:** Math and code regions are found first (code before math). No nesting.
-2. **Macros:** Expanded top-to-bottom in normal text only; `\n` -> `<br>`. No expansion inside math/code.
-3. **Blocks:** Frontmatter, headings, lists, code blocks, display math, then paragraphs. Lists and fences respect indentation.
-4. **Inline:** Runs only inside paragraph/heading text. Code and math suppress further inline parsing.
-5. **Errors:** Invalid or unmatched syntax fails compilation; no error correction.
+=[1] **Pre-lex:** Math and code regions are found first (code before math). No nesting.
+= **Macros:** Expanded top-to-bottom in normal text only; `\n` -> `<br>`. No expansion inside math/code.
+= **Blocks:** Frontmatter, headings, lists, code blocks, display math, then paragraphs. Lists and fences respect indentation.
+= **Inline:** Runs only inside paragraph/heading text. Code and math suppress further inline parsing.
+= **Errors:** Invalid or unmatched syntax fails compilation; no error correction.
 
 ---
 

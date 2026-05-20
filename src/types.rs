@@ -26,8 +26,10 @@ pub enum Block {
     },
     List {
         ordered: bool,
-        style: Option<String>,
         items: Vec<ListItem>,
+    },
+    Blockquote {
+        blocks: Vec<Block>,
     },
     CodeBlock {
         lang: String,
@@ -41,6 +43,7 @@ pub enum Block {
 #[derive(Clone, Debug)]
 pub struct ListItem {
     pub depth: usize,
+    pub marker: Option<String>,
     pub blocks: Vec<Block>,
 }
 

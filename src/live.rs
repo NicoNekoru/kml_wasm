@@ -198,6 +198,8 @@ fn split_live_chunks(source: &str) -> Vec<String> {
             i = consume_html_fence(&lines, i);
         } else if starts_multiline_display_math(trimmed) {
             i = consume_display_math(&lines, i, trimmed.starts_with("\\["));
+        } else if is_blockquote_marker(trimmed) {
+            i = consume_blockquote(&lines, i);
         } else if is_heading(trimmed) {
             i += 1;
         } else if is_list_marker(lines[i].trim_start()) {
@@ -254,6 +256,18 @@ fn consume_display_math(lines: &[&str], start: usize, is_bracket: bool) -> usize
     lines.len()
 }
 
+fn consume_blockquote(lines: &[&str], start: usize) -> usize {
+    let mut i = start;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        if lines[i].trim().is_empty() || !is_blockquote_marker(trimmed) {
+            break;
+        }
+        i += 1;
+    }
+    i
+}
+
 fn consume_list(lines: &[&str], start: usize, base_indent: usize) -> usize {
     let mut i = start + 1;
     while i < lines.len() {
@@ -285,7 +299,37 @@ fn is_heading(trimmed: &str) -> bool {
 }
 
 fn is_list_marker(trimmed: &str) -> bool {
-    trimmed.starts_with("- ") || trimmed.starts_with("-[") || trimmed.starts_with("=[")
+    if trimmed.starts_with("- ") || trimmed.starts_with("-[") || trimmed.starts_with("=[") {
+        return true;
+    }
+    let Some(rest) = trimmed.strip_prefix('=') else {
+        return false;
+    };
+    if rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace) {
+        return true;
+    }
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let label = parts.next().unwrap_or("");
+    if parts.next().is_none() {
+        return false;
+    }
+    let counter = label.trim_end_matches(&['.', ')'][..]);
+    !counter.is_empty()
+        && counter.chars().all(|c| c.is_ascii_alphanumeric())
+        && label[counter.len()..]
+            .chars()
+            .all(|c| matches!(c, '.' | ')'))
+}
+
+fn is_blockquote_marker(trimmed: &str) -> bool {
+    let Some(after_marker) = trimmed.strip_prefix('>') else {
+        return false;
+    };
+    after_marker.is_empty()
+        || after_marker
+            .chars()
+            .next()
+            .is_some_and(|c| c == ' ' || c == '\t')
 }
 
 fn leading_spaces(line: &str) -> usize {

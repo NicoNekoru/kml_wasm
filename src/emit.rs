@@ -107,31 +107,45 @@ impl Emitter {
                 let inner: String = inlines.iter().map(|inl| self.emit_inline(inl)).collect();
                 format!("<p>{inner}</p>")
             }
-            Block::List {
-                ordered,
-                style,
-                items,
-            } => {
-                let tag = if *ordered { "ol" } else { "ul" };
-                let mut attrs = String::new();
+            Block::List { ordered, items } => {
                 if *ordered {
-                    if let Some(s) = style.as_deref() {
-                        // "1", "a", or "i" – anything else is ignored and falls back to default.
-                        if s == "1" || s == "a" || s == "i" {
-                            attrs = format!(" type=\"{s}\"");
+                    let mut out = String::from("<ol class=\"kml-ordered-list\">");
+                    for item in items {
+                        out.push_str("<li>");
+                        if let Some(marker) = item.marker.as_deref() {
+                            out.push_str(&format!(
+                                "<span class=\"kml-list-marker\">{}</span>",
+                                escape_html(marker)
+                            ));
                         }
+                        out.push_str("<div class=\"kml-list-body\">");
+                        for b in &item.blocks {
+                            out.push_str(&self.emit_block(b));
+                        }
+                        out.push_str("</div></li>");
                     }
-                }
-                let mut out = format!("<{tag}{attrs}>");
-                for item in items {
-                    out.push_str("<li>");
-                    for b in &item.blocks {
-                        out.push_str(&self.emit_block(b));
+                    out.push_str("</ol>");
+                    out
+                } else {
+                    let mut out = String::from("<ul>");
+                    for item in items {
+                        out.push_str("<li>");
+                        for b in &item.blocks {
+                            out.push_str(&self.emit_block(b));
+                        }
+                        out.push_str("</li>");
                     }
-                    out.push_str("</li>");
+                    out.push_str("</ul>");
+                    out
                 }
-                out.push_str(&format!("</{tag}>"));
-                out
+            }
+            Block::Blockquote { blocks } => {
+                let inner = blocks
+                    .iter()
+                    .map(|b| self.emit_block(b))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("<blockquote>{inner}</blockquote>")
             }
             Block::Table { rows, header_rows } => {
                 let mut out = String::from("<table>");

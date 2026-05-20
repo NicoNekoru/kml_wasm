@@ -23,13 +23,15 @@
 
 ````markdown
 - first item
-    -[a] nested item
+    =[a] nested item
+    = continued nested item
+    =[Problem {a}:i] verbose marker item
         ```python
         def f(x):
             return x
         ```
         $$\int_0^1 x dx$$
-    -[i] another nested
+    = another verbose marker item
 ````
 
 * Checks:
@@ -37,6 +39,7 @@
   * Indentation consistency across nested lists and blocks.
   * Code and math blocks respecting list indentation.
   * Multilevel list parsing.
+  * Ordered-list continuations and verbose marker templates.
 
 ---
 
@@ -206,3 +209,24 @@ Literal line-break macro: \\n.
   * Escaping the closing bracket prevents `[label](url)` from becoming a link.
   * Escaped formatting/code/sup/sub delimiters render literally.
   * `\\n` renders literal `\n`; only unescaped `\n` expands to `<br>`.
+
+---
+
+### **13. Blockquotes as nested block containers**
+
+````markdown
+> Quote with **inline formatting**.
+> #[2] Heading inside quote
+> - list inside quote
+
+> > > ```text
+> > >     deeply quoted code
+> > > ```
+````
+
+* Checks:
+
+  * `> ` creates a blockquote, not a paragraph prefix.
+  * Quoted content is parsed as a new block list, so headings, lists, math, tables, and code fences work inside it.
+  * Repeated quote markers create nested blockquotes.
+  * Quoted code fences strip the quote prefixes first, then strip common raw code indentation.

@@ -15,13 +15,10 @@ pub enum Block {
     List {
         /// `true` for `<ol>`, `false` for `<ul>`.
         ordered: bool,
-        /// For ordered lists, optional style:
-        /// - `"1"` -> `<ol type="1">`
-        /// - `"a"` -> `<ol type="a">`
-        /// - `"i"` -> `<ol type="i">`
-        /// `None` for unordered lists.
-        style: Option<String>,
         items: Vec<ListItem>,
+    },
+    Blockquote {
+        blocks: Vec<Block>,
     },
     Table {
         rows: Vec<TableRow>,
@@ -41,6 +38,8 @@ pub enum Block {
 
 #[derive(Debug, Clone)]
 pub struct ListItem {
+    /// Visible marker for ordered lists. `None` for unordered list items.
+    pub marker: Option<String>,
     pub blocks: Vec<Block>,
 }
 

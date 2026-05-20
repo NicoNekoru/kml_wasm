@@ -41,10 +41,17 @@ Important cases:
     * /^#\[(\d+)\]/ -- (#[n] text) for n-th level headings
     - Optional explicit ID: `#[n] text {#id}`  
 * /^\s*- / -- (- text) at the start of the line for unordered list
-    * /^\s*=\[(a|i|1)\] / -- (= [a] text) for an ordered list with label `a` (`a` for \alph*, `i` for \roman*, and `1` for \arabic*)
-    * NOTE: The default ordered list hierarchy is arabic -> alphabet -> roman -> arabic -> ...
+    * /^\s*= / -- (`= text`) for an ordered-list item that continues the current marker template. If it starts a new ordered list, it uses arabic markers beginning at `1.`.
+    * /^\s*=\[(.+?)\] / -- explicit ordered-list marker template. Simple shorthands are `=[1]`, `=[a]`, `=[A]`, `=[i]`, `=[I]`, and suffix forms such as `=[a)]`; bare shorthands default to a trailing dot.
+    * A colon supplies the starting value for the template: `=[1:4]` renders `4.`, `=[a:i]` renders `i.`, and `=[a):i]` renders `i)`.
+    * Verbose labels must use exactly one counter slot to avoid ambiguity: `=[Problem {a}:i]` renders `Problem i`, then bare `=` continues as `Problem j`. Slots are `{1}`, `{a}`, `{A}`, `{i}`, and `{I}`.
+    * Explicit markers update the continuation state for later bare `=` items. This supports gaps and style switches inside one semantic ordered list.
     * NOTE: List depth is determined by the file-wide indent unit set at the first nested list.
     * NOTE: For some level of list depth, that number of tabs/spaces is treated as the start of the line. This means that we can next code blocks, lists, math environments, etc. within some list level.
+* /^\s*> / -- (`> text`) for blockquotes.
+    - Each quoted line strips one `>` marker and an optional following space, then the stripped content is parsed as a fresh block list.
+    - Nested blockquotes are just repeated quote markers: `> > quoted`.
+    - Code fences, lists, headings, tables, and display math are legal inside blockquotes. For quoted code fences, the opening and closing fence must be quoted at the same depth; after quote stripping, normal code-block indentation trimming applies.
 * Markdown tables use pipe-delimited rows and a dash delimiter row: `| H1 | H2 |\n| --- | --- |\n| A | B |`.
     - Delimiter cells may use `:---`, `:---:`, or `---:` for left, center, and right alignment.
     - Multiple rows before the delimiter row are emitted as header rows.

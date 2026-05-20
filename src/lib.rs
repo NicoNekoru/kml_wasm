@@ -89,27 +89,74 @@ This is a new paragraph."#;
 - first unordered item
 - second item
     =[a] nested ordered (alphabetic)
-    =[a] second at same depth
+    = second at same depth
     =[1] arabic style
         - deeply nested bullet
 "#;
         let html = compile_inner(source).expect("nested lists must compile");
         // Top-level unordered list
         assert!(html.contains("<ul>"), "expected outer <ul>, got: {html}");
-        // Nested ordered list (alphabetic)
+        // Nested ordered list with explicit rendered markers
         assert!(
-            html.contains("<ol type=\"a\">"),
-            "expected nested <ol type=\"a\">, got: {html}"
+            html.contains("<ol class=\"kml-ordered-list\">"),
+            "expected nested ordered list, got: {html}"
         );
-        // Nested ordered list (numeric)
         assert!(
-            html.contains("<ol type=\"1\">") || html.contains("<ol type=\"a\">"),
-            "expected ordered lists; got: {html}"
+            html.contains("<span class=\"kml-list-marker\">a.</span>")
+                && html.contains("<span class=\"kml-list-marker\">b.</span>")
+                && html.contains("<span class=\"kml-list-marker\">1.</span>"),
+            "expected explicit and continued ordered markers; got: {html}"
         );
         // Deeply nested bullet inside an ordered item
         assert!(
             html.contains("deeply nested bullet"),
             "expected deeply nested bullet text; got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_parses_inner_blocks() {
+        let source = r#"
+> Quote with **bold** text.
+> #[2] Quoted heading
+> - quoted list item
+"#;
+        let html = compile_inner(source).expect("blockquote must compile");
+        assert!(
+            html.contains("<blockquote>"),
+            "expected blockquote wrapper; got: {html}"
+        );
+        assert!(
+            html.contains("<p>Quote with <strong>bold</strong> text.</p>"),
+            "expected inline parsing inside quoted paragraph; got: {html}"
+        );
+        assert!(
+            html.contains("<h2 id=\"quoted-heading\">Quoted heading</h2>"),
+            "expected heading parsed inside blockquote; got: {html}"
+        );
+        assert!(
+            html.contains("<ul><li><p>quoted list item</p></li></ul>"),
+            "expected list parsed inside blockquote; got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_nested_blockquote_with_code_block_strips_quote_prefixes_and_padding() {
+        let source = r#"
+> > > ```text
+> > >     alpha
+> > >     beta
+> > > ```
+"#;
+        let html = compile_inner(source).expect("nested blockquote code block must compile");
+        assert_eq!(
+            html.matches("<blockquote>").count(),
+            3,
+            "expected three nested blockquotes; got: {html}"
+        );
+        assert!(
+            html.contains("<pre><code class=\"language-text\">alpha\nbeta</code></pre>"),
+            "expected quoted code fence to strip quote prefixes and common padding; got: {html}"
         );
     }
 
@@ -126,14 +173,72 @@ This is a new paragraph."#;
 =[ii] second roman (treated as style i)
 "#;
         let html = compile_inner(source).expect("shorthand ordered lists must compile");
-        // We should see at least one numeric ordered list and one alphabetic/roman list.
+        // Shorthands resolve to explicit visible markers.
         assert!(
-            html.contains("<ol type=\"1\">"),
-            "expected numeric ordered list; got: {html}"
+            html.contains("<span class=\"kml-list-marker\">1.</span>")
+                && html.contains("<span class=\"kml-list-marker\">2.</span>"),
+            "expected numeric ordered markers; got: {html}"
         );
         assert!(
-            html.contains("<ol type=\"a\">") || html.contains("<ol type=\"i\">"),
-            "expected alpha or roman ordered list; got: {html}"
+            html.contains("<span class=\"kml-list-marker\">a.</span>")
+                && html.contains("<span class=\"kml-list-marker\">b.</span>")
+                && html.contains("<span class=\"kml-list-marker\">i.</span>")
+                && html.contains("<span class=\"kml-list-marker\">ii.</span>"),
+            "expected alpha and roman ordered markers; got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_ordered_list_continuation_and_verbose_template() {
+        let source = r#"
+= first implicit numeric
+= second implicit numeric
+=[4] fourth numeric
+= fifth numeric
+=[a:i] ninth alpha
+= tenth alpha
+=[a):i] old suffix shorthand
+= suffix continuation
+=[Problem {a}:i] verbose alpha problem
+= verbose continuation
+=[Item {1}.:7] verbose decimal
+= verbose decimal continuation
+"#;
+        let html = compile_inner(source).expect("ordered list continuation must compile");
+        for marker in [
+            "1.",
+            "2.",
+            "4.",
+            "5.",
+            "i.",
+            "j.",
+            "i)",
+            "j)",
+            "Problem i",
+            "Problem j",
+            "Item 7.",
+            "Item 8.",
+        ] {
+            assert!(
+                html.contains(&format!("<span class=\"kml-list-marker\">{marker}</span>")),
+                "expected marker {marker}; got: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ordered_verbose_template_requires_counter_slot() {
+        let err =
+            compile_inner("=[Problem alpha i] ambiguous").expect_err("ambiguous marker must fail");
+        assert!(
+            err.message.contains("Invalid list marker"),
+            "expected invalid list marker error; got: {err:?}"
+        );
+
+        let err = compile_inner("=[1]tight").expect_err("marker must be separated from item text");
+        assert!(
+            err.message.contains("Invalid list marker"),
+            "expected invalid list marker error; got: {err:?}"
         );
     }
 

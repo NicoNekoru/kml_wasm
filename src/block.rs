@@ -1,5 +1,5 @@
 //! Block parser: consumes expanded source line-by-line.
-//! Frontmatter, headings, lists, code blocks, display math, paragraphs.
+//! Frontmatter, headings, lists, blockquotes, code blocks, display math, paragraphs.
 
 use crate::ast::{Block, Inline, ListItem, TableAlignment, TableCell, TableRow};
 use crate::escape::{find_unescaped_sequence, is_escaped_at};
@@ -8,26 +8,35 @@ use crate::prelex::CompileError;
 use std::result::Result;
 
 pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), CompileError> {
+    parse_blocks_inner(source, true)
+}
+
+fn parse_blocks_inner(
+    source: &str,
+    allow_frontmatter: bool,
+) -> Result<(Option<String>, Vec<Block>), CompileError> {
     let mut blocks = Vec::new();
     let mut frontmatter = None;
     let lines: Vec<&str> = source.lines().collect();
     let mut i = 0;
 
-    if let Some(first) = lines.first() {
-        if first.trim() == "---" {
-            let start = i;
-            i += 1;
-            while i < lines.len() && lines[i].trim() != "---" {
+    if allow_frontmatter {
+        if let Some(first) = lines.first() {
+            if first.trim() == "---" {
+                let start = i;
+                i += 1;
+                while i < lines.len() && lines[i].trim() != "---" {
+                    i += 1;
+                }
+                if i >= lines.len() {
+                    return Err(CompileError {
+                        message: "Unclosed frontmatter".into(),
+                        offset: 0,
+                    });
+                }
+                frontmatter = Some(lines[start + 1..i].join("\n"));
                 i += 1;
             }
-            if i >= lines.len() {
-                return Err(CompileError {
-                    message: "Unclosed frontmatter".into(),
-                    offset: 0,
-                });
-            }
-            frontmatter = Some(lines[start + 1..i].join("\n"));
-            i += 1;
         }
     }
 
@@ -43,6 +52,12 @@ pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), Compil
             continue;
         }
 
+        if is_blockquote_marker(trimmed) {
+            let (block, next) = parse_blockquote(&lines, i, 0)?;
+            blocks.push(block);
+            i = next;
+            continue;
+        }
         if trimmed.starts_with("```") {
             let (block, next) = parse_code_block(&lines, i)?;
             blocks.push(block);
@@ -125,6 +140,56 @@ pub fn parse_blocks(source: &str) -> Result<(Option<String>, Vec<Block>), Compil
     }
 
     Ok((frontmatter, blocks))
+}
+
+fn is_blockquote_marker(trimmed: &str) -> bool {
+    strip_blockquote_marker(trimmed).is_some()
+}
+
+fn strip_blockquote_marker(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let after_marker = trimmed.strip_prefix('>')?;
+    if after_marker.is_empty() {
+        return Some("");
+    }
+    let first = after_marker.chars().next()?;
+    if first == ' ' || first == '\t' {
+        Some(&after_marker[first.len_utf8()..])
+    } else {
+        None
+    }
+}
+
+fn parse_blockquote(
+    lines: &[&str],
+    start: usize,
+    min_indent: usize,
+) -> Result<(Block, usize), CompileError> {
+    let mut inner_lines = Vec::new();
+    let mut i = start;
+
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim().is_empty() || leading_spaces(line) < min_indent {
+            break;
+        }
+        let Some(inner) = strip_blockquote_marker(line) else {
+            break;
+        };
+        inner_lines.push(inner.to_string());
+        i += 1;
+    }
+
+    if inner_lines.is_empty() {
+        return Err(CompileError {
+            message: "Empty blockquote".into(),
+            offset: byte_offset_from_lines(lines, start, 0),
+        });
+    }
+
+    let source = inner_lines.join("\n");
+    let (_frontmatter, blocks) = parse_blocks_inner(&source, false)?;
+    Ok((Block::Blockquote { blocks }, i))
 }
 
 fn parse_code_block(lines: &[&str], start: usize) -> Result<(Block, usize), CompileError> {
@@ -683,95 +748,455 @@ fn unescape_table_cell(raw: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListKind {
     Unordered,
-    Ordered { style: &'static str },
+    Ordered,
 }
 
-/// True if `label` is a non-empty Roman numeral fragment (e.g. `ii` for second item in an `i`-style list).
-fn roman_numeral_marker_label(label: &str) -> bool {
-    !label.is_empty()
-        && label.chars().all(|c| {
-            matches!(
-                c,
-                'i' | 'I' | 'v' | 'V' | 'x' | 'X' | 'l' | 'L' | 'c' | 'C' | 'm' | 'M'
-            )
-        })
+#[derive(Debug, Clone)]
+struct ParsedMarker<'a> {
+    kind: ListKind,
+    rest: &'a str,
+    ordered: Option<OrderedMarkerSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OrderedMarkerSpec {
+    Continue,
+    Explicit {
+        template: OrderedTemplate,
+        start: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrderedState {
+    template: OrderedTemplate,
+    next_value: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrderedTemplate {
+    raw: String,
+    style: CounterStyle,
+    slot: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CounterStyle {
+    Decimal,
+    LowerAlpha,
+    UpperAlpha,
+    LowerRoman,
+    UpperRoman,
+}
+
+struct ParsedOrderedTemplate {
+    template: OrderedTemplate,
+    default_start: usize,
+}
+
+impl OrderedTemplate {
+    fn render(&self, value: usize) -> String {
+        self.raw.replace(self.slot, &self.style.format_value(value))
+    }
+}
+
+impl CounterStyle {
+    fn slot(self) -> &'static str {
+        match self {
+            CounterStyle::Decimal => "{1}",
+            CounterStyle::LowerAlpha => "{a}",
+            CounterStyle::UpperAlpha => "{A}",
+            CounterStyle::LowerRoman => "{i}",
+            CounterStyle::UpperRoman => "{I}",
+        }
+    }
+
+    fn format_value(self, value: usize) -> String {
+        match self {
+            CounterStyle::Decimal => value.to_string(),
+            CounterStyle::LowerAlpha => format_alpha_counter(value, false),
+            CounterStyle::UpperAlpha => format_alpha_counter(value, true),
+            CounterStyle::LowerRoman => format_roman_counter(value, false),
+            CounterStyle::UpperRoman => format_roman_counter(value, true),
+        }
+    }
+
+    fn parse_value(self, raw: &str) -> Option<usize> {
+        match self {
+            CounterStyle::Decimal => raw.parse::<usize>().ok().filter(|v| *v > 0),
+            CounterStyle::LowerAlpha => parse_alpha_counter(raw, false),
+            CounterStyle::UpperAlpha => parse_alpha_counter(raw, true),
+            CounterStyle::LowerRoman => parse_roman_counter(raw, false),
+            CounterStyle::UpperRoman => parse_roman_counter(raw, true),
+        }
+    }
 }
 
 /// Detect if a trimmed line starts with any list marker.
 fn is_list_marker(trimmed: &str) -> bool {
-    trimmed.starts_with("- ") || trimmed.starts_with("-[") || trimmed.starts_with("=[")
+    if trimmed.starts_with("- ") || trimmed.starts_with("-[") || trimmed.starts_with("=[") {
+        return true;
+    }
+    let Some(rest) = trimmed.strip_prefix('=') else {
+        return false;
+    };
+    if rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace) {
+        return true;
+    }
+
+    let mut iter = rest.splitn(2, char::is_whitespace);
+    let label_raw = iter.next().unwrap_or("");
+    iter.next().is_some() && parse_ordered_marker_spec(label_raw).is_some()
 }
 
-/// Classify a list marker and return (kind, rest_of_line_after_marker).
-fn classify_marker(trimmed: &str, default_ordered: Option<ListKind>) -> Option<(ListKind, &str)> {
-    // New ordered syntax: =[x]
+/// Classify a list marker and return its kind, item text, and ordered-list marker spec.
+fn classify_marker(trimmed: &str) -> Option<ParsedMarker<'_>> {
+    // Ordered marker template: =[x], =[a):i], =[Problem {a}:i], etc.
     if let Some(rest) = trimmed.strip_prefix("=[") {
-        let close = rest.find(']')?;
-        let label = &rest[..close];
-        let after = rest[close + 1..].trim_start();
-        let style = match label {
-            "a" | "A" => "a",
-            "i" | "I" => "i",
-            _ if label.chars().all(|c| c.is_ascii_digit()) => "1",
-            _ if roman_numeral_marker_label(label) => "i",
-            // Continuation markers for alphabetic lists: =[b], =[c], …
-            _ if label.len() == 1
-                && label
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_ascii_alphabetic() && !matches!(c, 'i' | 'I')) =>
-            {
-                "a"
-            }
-            _ => return None,
-        };
-        return Some((ListKind::Ordered { style }, after));
+        let (spec, after) = split_bracket_marker(rest)?;
+        let (template, start) = parse_ordered_marker_spec(spec)?;
+        return Some(ParsedMarker {
+            kind: ListKind::Ordered,
+            rest: after,
+            ordered: Some(OrderedMarkerSpec::Explicit { template, start }),
+        });
     }
 
-    // Shorthand ordered syntax: =1. text, =a. text, =i. text
+    // Bare ordered continuation. At the start of an ordered list, this means numeric from 1.
     if let Some(rest) = trimmed.strip_prefix('=') {
-        // label_raw is everything up to the first space, e.g. "1." in "=1. Item"
+        if rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace) {
+            return Some(ParsedMarker {
+                kind: ListKind::Ordered,
+                rest: rest.trim_start(),
+                ordered: Some(OrderedMarkerSpec::Continue),
+            });
+        }
+
+        // Legacy compact ordered syntax: =1. text, =a) text, =i. text.
         let mut iter = rest.splitn(2, char::is_whitespace);
         let label_raw = iter.next().unwrap_or("");
-        let after = iter.next().unwrap_or("").trim_start();
-        if !label_raw.is_empty() {
-            // Strip common punctuation like '.' or ')' from the end of the label.
-            let label = label_raw.trim_end_matches(&['.', ')'][..]);
-            let style = match label {
-                "a" | "A" => "a",
-                "i" | "I" => "i",
-                _ if label.chars().all(|c| c.is_ascii_digit()) => "1",
-                _ => return None,
-            };
-            return Some((ListKind::Ordered { style }, after));
+        let after = iter.next()?.trim_start();
+        if let Some((template, start)) = parse_ordered_marker_spec(label_raw) {
+            return Some(ParsedMarker {
+                kind: ListKind::Ordered,
+                rest: after,
+                ordered: Some(OrderedMarkerSpec::Explicit { template, start }),
+            });
         }
     }
 
-    // Legacy ordered syntax: -[x]
+    // Legacy ordered syntax: -[x].
     if let Some(rest) = trimmed.strip_prefix("-[") {
-        let close = rest.find(']')?;
-        let label = &rest[..close];
-        let after = rest[close + 1..].trim_start();
-        let style = match label {
-            "a" | "A" => "a",
-            "i" | "I" => "i",
-            _ if label.chars().all(|c| c.is_ascii_digit()) => "1",
-            _ => return None,
-        };
-        return Some((ListKind::Ordered { style }, after));
+        let (spec, after) = split_bracket_marker(rest)?;
+        let (template, start) = parse_ordered_marker_spec(spec)?;
+        return Some(ParsedMarker {
+            kind: ListKind::Ordered,
+            rest: after,
+            ordered: Some(OrderedMarkerSpec::Explicit { template, start }),
+        });
     }
 
-    // Unordered: "- " at the current depth.
     if let Some(rest) = trimmed.strip_prefix("- ") {
-        // If the list is already known to be ordered, treat "- " as another ordered
-        // item at the same depth (labels inferred by position).
-        if let Some(ListKind::Ordered { style }) = default_ordered {
-            return Some((ListKind::Ordered { style }, rest.trim_start()));
-        }
-        return Some((ListKind::Unordered, rest.trim_start()));
+        return Some(ParsedMarker {
+            kind: ListKind::Unordered,
+            rest: rest.trim_start(),
+            ordered: None,
+        });
     }
 
     None
+}
+
+fn split_bracket_marker(rest: &str) -> Option<(&str, &str)> {
+    let (spec, after) = rest.split_once(']')?;
+    if after.is_empty() || after.chars().next().is_some_and(char::is_whitespace) {
+        Some((spec, after.trim_start()))
+    } else {
+        None
+    }
+}
+
+fn parse_ordered_marker_spec(spec: &str) -> Option<(OrderedTemplate, usize)> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return None;
+    }
+
+    for (idx, ch) in spec.char_indices().rev() {
+        if ch != ':' {
+            continue;
+        }
+        let lhs = spec[..idx].trim_end();
+        let rhs = spec[idx + ch.len_utf8()..].trim_start();
+        if lhs.is_empty() || rhs.is_empty() {
+            continue;
+        }
+        if let Some(parsed) = parse_ordered_template(lhs) {
+            if let Some(start) = parsed.template.style.parse_value(rhs) {
+                return Some((parsed.template, start));
+            }
+        }
+    }
+
+    let parsed = parse_ordered_template(spec)?;
+    Some((parsed.template, parsed.default_start))
+}
+
+fn parse_ordered_template(raw: &str) -> Option<ParsedOrderedTemplate> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let mut found_slot: Option<(&'static str, CounterStyle)> = None;
+    for (slot, style) in [
+        ("{1}", CounterStyle::Decimal),
+        ("{a}", CounterStyle::LowerAlpha),
+        ("{A}", CounterStyle::UpperAlpha),
+        ("{i}", CounterStyle::LowerRoman),
+        ("{I}", CounterStyle::UpperRoman),
+    ] {
+        let count = raw.matches(slot).count();
+        if count > 1 || (count == 1 && found_slot.is_some()) {
+            return None;
+        }
+        if count == 1 {
+            found_slot = Some((slot, style));
+        }
+    }
+
+    if let Some((slot, style)) = found_slot {
+        return Some(ParsedOrderedTemplate {
+            template: OrderedTemplate {
+                raw: raw.to_string(),
+                style,
+                slot,
+            },
+            default_start: 1,
+        });
+    }
+
+    parse_simple_ordered_template(raw)
+}
+
+fn parse_simple_ordered_template(raw: &str) -> Option<ParsedOrderedTemplate> {
+    let first = raw.chars().next()?;
+    let counter_len = if first.is_ascii_digit() {
+        raw.char_indices()
+            .find(|(_, c)| !c.is_ascii_digit())
+            .map(|(idx, _)| idx)
+            .unwrap_or(raw.len())
+    } else if first.is_ascii_alphabetic() {
+        raw.char_indices()
+            .find(|(_, c)| !c.is_ascii_alphabetic())
+            .map(|(idx, _)| idx)
+            .unwrap_or(raw.len())
+    } else {
+        return None;
+    };
+
+    let counter = &raw[..counter_len];
+    let suffix = &raw[counter_len..];
+    if !suffix.chars().all(is_ordered_marker_suffix_char) {
+        return None;
+    }
+
+    let (style, default_start) = infer_simple_counter(counter)?;
+    let suffix = if suffix.is_empty() { "." } else { suffix };
+    Some(ParsedOrderedTemplate {
+        template: OrderedTemplate {
+            raw: format!("{}{}", style.slot(), suffix),
+            style,
+            slot: style.slot(),
+        },
+        default_start,
+    })
+}
+
+fn is_ordered_marker_suffix_char(c: char) -> bool {
+    matches!(c, '.' | ')')
+}
+
+fn infer_simple_counter(counter: &str) -> Option<(CounterStyle, usize)> {
+    if counter.chars().all(|c| c.is_ascii_digit()) {
+        return counter
+            .parse::<usize>()
+            .ok()
+            .filter(|v| *v > 0)
+            .map(|value| (CounterStyle::Decimal, value));
+    }
+
+    if !counter.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+
+    if counter.len() == 1 {
+        let c = counter.chars().next()?;
+        return match c {
+            'i' => Some((CounterStyle::LowerRoman, 1)),
+            'I' => Some((CounterStyle::UpperRoman, 1)),
+            _ if c.is_ascii_lowercase() => {
+                parse_alpha_counter(counter, false).map(|value| (CounterStyle::LowerAlpha, value))
+            }
+            _ if c.is_ascii_uppercase() => {
+                parse_alpha_counter(counter, true).map(|value| (CounterStyle::UpperAlpha, value))
+            }
+            _ => None,
+        };
+    }
+
+    if counter.chars().all(|c| c.is_ascii_lowercase()) {
+        if let Some(value) = parse_roman_counter(counter, false) {
+            return Some((CounterStyle::LowerRoman, value));
+        }
+        return parse_alpha_counter(counter, false).map(|value| (CounterStyle::LowerAlpha, value));
+    }
+
+    if counter.chars().all(|c| c.is_ascii_uppercase()) {
+        if let Some(value) = parse_roman_counter(counter, true) {
+            return Some((CounterStyle::UpperRoman, value));
+        }
+        return parse_alpha_counter(counter, true).map(|value| (CounterStyle::UpperAlpha, value));
+    }
+
+    None
+}
+
+fn resolve_ordered_marker(spec: OrderedMarkerSpec, state: &mut Option<OrderedState>) -> String {
+    match spec {
+        OrderedMarkerSpec::Explicit { template, start } => {
+            *state = Some(OrderedState {
+                template,
+                next_value: start,
+            });
+        }
+        OrderedMarkerSpec::Continue => {
+            if state.is_none() {
+                let style = CounterStyle::Decimal;
+                *state = Some(OrderedState {
+                    template: OrderedTemplate {
+                        raw: format!("{}.", style.slot()),
+                        style,
+                        slot: style.slot(),
+                    },
+                    next_value: 1,
+                });
+            }
+        }
+    }
+
+    let state = state
+        .as_mut()
+        .expect("ordered list marker state must be initialized");
+    let marker = state.template.render(state.next_value);
+    state.next_value += 1;
+    marker
+}
+
+fn parse_alpha_counter(raw: &str, uppercase: bool) -> Option<usize> {
+    if raw.is_empty() {
+        return None;
+    }
+    let mut value = 0usize;
+    for c in raw.chars() {
+        if uppercase && !c.is_ascii_uppercase() {
+            return None;
+        }
+        if !uppercase && !c.is_ascii_lowercase() {
+            return None;
+        }
+        value = value * 26 + (c.to_ascii_lowercase() as usize - 'a' as usize + 1);
+    }
+    Some(value)
+}
+
+fn format_alpha_counter(mut value: usize, uppercase: bool) -> String {
+    if value == 0 {
+        return String::new();
+    }
+    let mut chars = Vec::new();
+    while value > 0 {
+        value -= 1;
+        let c = (b'a' + (value % 26) as u8) as char;
+        chars.push(if uppercase { c.to_ascii_uppercase() } else { c });
+        value /= 26;
+    }
+    chars.iter().rev().collect()
+}
+
+fn parse_roman_counter(raw: &str, uppercase: bool) -> Option<usize> {
+    if raw.is_empty() {
+        return None;
+    }
+    if uppercase && !raw.chars().all(|c| c.is_ascii_uppercase()) {
+        return None;
+    }
+    if !uppercase && !raw.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+
+    let mut total = 0isize;
+    let mut prev = 0isize;
+    for c in raw.chars().rev() {
+        let value = roman_digit_value(c)? as isize;
+        if value < prev {
+            total -= value;
+        } else {
+            total += value;
+            prev = value;
+        }
+    }
+    if total <= 0 {
+        return None;
+    }
+    let value = total as usize;
+    if format_roman_counter(value, uppercase) == raw {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn roman_digit_value(c: char) -> Option<usize> {
+    match c.to_ascii_uppercase() {
+        'I' => Some(1),
+        'V' => Some(5),
+        'X' => Some(10),
+        'L' => Some(50),
+        'C' => Some(100),
+        'D' => Some(500),
+        'M' => Some(1000),
+        _ => None,
+    }
+}
+
+fn format_roman_counter(mut value: usize, uppercase: bool) -> String {
+    let mut out = String::new();
+    for (arabic, roman) in [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ] {
+        while value >= arabic {
+            out.push_str(roman);
+            value -= arabic;
+        }
+    }
+    if uppercase {
+        out
+    } else {
+        out.to_ascii_lowercase()
+    }
 }
 
 fn parse_list(
@@ -793,15 +1218,14 @@ fn parse_list(
     // Determine list kind from the first item at this base_indent.
     let first_line = lines[i];
     let first_trimmed = first_line.trim_start();
-    let (kind, _first_rest) = classify_marker(first_trimmed, None).ok_or(CompileError {
+    let first_marker = classify_marker(first_trimmed).ok_or(CompileError {
         message: "Invalid list marker".into(),
         offset: byte_offset_from_lines(lines, start, 0),
     })?;
+    let kind = first_marker.kind;
 
-    let (ordered, style_opt) = match kind {
-        ListKind::Unordered => (false, None),
-        ListKind::Ordered { style } => (true, Some(style.to_string())),
-    };
+    let ordered = kind == ListKind::Ordered;
+    let mut ordered_state: Option<OrderedState> = None;
 
     // Parse items at this indentation until we hit a line that belongs to the parent
     // (indent < base_indent) or a non-list line at this level.
@@ -814,24 +1238,36 @@ fn parse_list(
         let trimmed = line[indent..].trim_start();
         // Only treat markers exactly at this indent as siblings in this list.
         if indent == base_indent {
-            if let Some((item_kind, rest)) = classify_marker(trimmed, Some(kind)) {
+            if let Some(marker) = classify_marker(trimmed) {
                 // Enforce consistent list kind at this level.
-                match (kind, item_kind) {
-                    (ListKind::Unordered, ListKind::Ordered { .. })
-                    | (ListKind::Ordered { .. }, ListKind::Unordered) => {
-                        return Err(CompileError {
-                            message: "Mixed ordered/unordered markers in the same list".into(),
-                            offset: byte_offset_from_lines(lines, i, 0),
-                        });
-                    }
-                    _ => {}
+                if kind != marker.kind {
+                    return Err(CompileError {
+                        message: "Mixed ordered/unordered markers in the same list".into(),
+                        offset: byte_offset_from_lines(lines, i, 0),
+                    });
                 }
+
+                let item_marker = if ordered {
+                    let spec = marker
+                        .ordered
+                        .expect("ordered markers must carry an ordered marker spec");
+                    Some(resolve_ordered_marker(spec, &mut ordered_state))
+                } else {
+                    None
+                };
+
                 let (item, next) =
-                    parse_list_item(lines, i, base_indent, &kind, rest, indent_unit)?;
+                    parse_list_item(lines, i, base_indent, marker.rest, item_marker, indent_unit)?;
                 items.push(item);
                 i = next;
                 continue;
             } else {
+                if is_list_marker(trimmed) {
+                    return Err(CompileError {
+                        message: "Invalid list marker".into(),
+                        offset: byte_offset_from_lines(lines, i, 0),
+                    });
+                }
                 break;
             }
         } else {
@@ -842,22 +1278,15 @@ fn parse_list(
         }
     }
 
-    Ok((
-        Block::List {
-            ordered,
-            style: style_opt,
-            items,
-        },
-        i,
-    ))
+    Ok((Block::List { ordered, items }, i))
 }
 
 fn parse_list_item(
     lines: &[&str],
     start: usize,
     base_indent: usize,
-    _kind: &ListKind,
     first_rest: &str,
+    marker: Option<String>,
     indent_unit: &mut Option<usize>,
 ) -> Result<(ListItem, usize), CompileError> {
     let mut blocks = Vec::new();
@@ -895,6 +1324,13 @@ fn parse_list_item(
                 });
             }
             *indent_unit = Some(delta);
+        }
+
+        if is_blockquote_marker(trimmed) {
+            let (block, next) = parse_blockquote(lines, i, base_indent + 1)?;
+            blocks.push(block);
+            i = next;
+            continue;
         }
 
         // Nested list?
@@ -958,7 +1394,7 @@ fn parse_list_item(
         i = next;
     }
 
-    Ok((ListItem { blocks }, i))
+    Ok((ListItem { marker, blocks }, i))
 }
 
 fn parse_paragraph(lines: &[&str], start: usize) -> Result<(Vec<Block>, usize), CompileError> {
@@ -1059,6 +1495,7 @@ fn is_block_start_line(line: &str) -> bool {
     }
     trimmed.starts_with("```")
         || trimmed == ":::html"
+        || is_blockquote_marker(trimmed)
         || trimmed.starts_with("$$")
         || trimmed.starts_with("\\[")
         || parse_heading(trimmed).is_some()
